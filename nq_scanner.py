@@ -10,12 +10,13 @@ What it checks:
   4. Patterns        -> engulfing, inside bar, opening range breakout
   5. News            -> recent headlines with simple keyword sentiment
 
-Setup:   pip install yfinance pandas numpy
+Setup:   pip install -r requirements.txt
 Run:     python nq_scanner.py
 
 Note: Yahoo data for NQ=F is delayed and has no order-flow detail. Treat output as a study aid.
 """
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
@@ -113,18 +114,20 @@ def liquidity_sweeps(today, lv):
 
 def fair_value_gaps(df, keep=5):
     h, l, idx = df["High"].values, df["Low"].values, df.index
+    n = len(df)
+    if n < 3:
+        return []
+    # min low / max high of all bars AFTER bar i (inf / -inf when none)
+    fut_min = np.append(np.minimum.accumulate(l[::-1])[::-1][1:], np.inf)
+    fut_max = np.append(np.maximum.accumulate(h[::-1])[::-1][1:], -np.inf)
     unfilled = []
-    for i in range(2, len(df)):
+    for i in range(2, n):
         if l[i] > h[i - 2]:
-            kind, lo, hi = "bullish", h[i - 2], l[i]
+            if fut_min[i] > h[i - 2]:
+                unfilled.append((idx[i], "bullish", float(h[i - 2]), float(l[i])))
         elif h[i] < l[i - 2]:
-            kind, lo, hi = "bearish", h[i], l[i - 2]
-        else:
-            continue
-        after = df.iloc[i + 1:]
-        filled = (after["Low"] <= lo).any() if kind == "bullish" else (after["High"] >= hi).any()
-        if not filled:
-            unfilled.append((idx[i], kind, float(lo), float(hi)))
+            if fut_max[i] < l[i - 2]:
+                unfilled.append((idx[i], "bearish", float(h[i]), float(l[i - 2])))
     return unfilled[-keep:]
 
 
@@ -172,6 +175,74 @@ def get_news():
     return scored
 
 
+# ---------------- Scoring ----------------
+
+def score_window(df, news=None):
+    """Score the LAST bar of df using only data up to and including it.
+
+    Returns a dict with the score, a list of (key, points, reason) factors and the
+    intermediate results the report prints. The backtest calls this bar by bar.
+    """
+    price = float(df["Close"].iloc[-1])
+    poc, hvns = volume_profile(df)
+    absorb = absorption(df)
+    lv, today = key_levels(df)
+    sweeps = liquidity_sweeps(today, lv)
+    fvgs = fair_value_gaps(df)
+    pats = candle_patterns(df)
+    news = news or []
+
+    factors = []
+
+    def add(key, points, why):
+        factors.append((key, points, why))
+
+    add("poc", 1 if price > poc else -1, f"price {'above' if price > poc else 'below'} POC {poc:.2f}")
+
+    recent_abs = [a for a in absorb if a[0] >= df.index[-6]] if len(df) >= 6 else []
+    if recent_abs:
+        a = recent_abs[-1]
+        add("absorption", 1 if a[2] == "bullish" else -1, f"absorption at {a[1]:.2f} ({a[3]})")
+
+    if sweeps:
+        s = sweeps[-1]
+        add("sweep", 1 if s[1] == "bullish" else -1, f"liquidity sweep: {s[2]}")
+
+    bull_fvg = [g for g in fvgs if g[1] == "bullish" and g[3] < price]
+    bear_fvg = [g for g in fvgs if g[1] == "bearish" and g[2] > price]
+    if len(bull_fvg) > len(bear_fvg):
+        add("fvg", 1, f"{len(bull_fvg)} unfilled bullish FVG(s) below price")
+    elif len(bear_fvg) > len(bull_fvg):
+        add("fvg", -1, f"{len(bear_fvg)} unfilled bearish FVG(s) above price")
+
+    for side, name in pats:
+        if side != "neutral":
+            add("engulfing", 1 if side == "bullish" else -1, name)
+
+    if lv["ORH"] is not None:
+        if price > lv["ORH"]:
+            add("opening_range", 1, f"above opening range high {lv['ORH']:.2f}")
+        elif price < lv["ORL"]:
+            add("opening_range", -1, f"below opening range low {lv['ORL']:.2f}")
+
+    news_total = sum(s for s, _ in news)
+    if news_total:
+        add("news", 1 if news_total > 0 else -1, f"news sentiment {news_total:+d}")
+
+    return {
+        "price": price, "poc": poc, "hvns": hvns, "levels": lv, "fvgs": fvgs,
+        "factors": factors, "score": sum(p for _, p, _ in factors),
+    }
+
+
+def verdict(score):
+    if score >= MIN_SCORE:
+        return "LONG bias - look for entries at nearest HVN / bullish FVG below"
+    if score <= -MIN_SCORE:
+        return "SHORT bias - look for entries at nearest HVN / bearish FVG above"
+    return "NO CLEAR EDGE - stand aside"
+
+
 # ---------------- Report ----------------
 
 def main():
@@ -180,56 +251,11 @@ def main():
         print("Not enough data returned. Market may be closed or Yahoo is rate limiting.")
         return
 
-    price = float(df["Close"].iloc[-1])
-    last_ts = df.index[-1]
-    poc, hvns = volume_profile(df)
-    absorb = absorption(df)
-    lv, today = key_levels(df)
-    sweeps = liquidity_sweeps(today, lv)
-    fvgs = fair_value_gaps(df)
-    pats = candle_patterns(df)
     news = get_news()
+    r = score_window(df, news)
+    price, poc, hvns, lv, fvgs = r["price"], r["poc"], r["hvns"], r["levels"], r["fvgs"]
+    last_ts = df.index[-1]
 
-    score, reasons = 0, []
-
-    def add(points, why):
-        nonlocal score
-        score += points
-        reasons.append(f"{'+' if points > 0 else ''}{points}  {why}")
-
-    add(1 if price > poc else -1, f"price {'above' if price > poc else 'below'} POC {poc:.2f}")
-
-    recent_abs = [a for a in absorb if a[0] >= df.index[-6]]
-    if recent_abs:
-        a = recent_abs[-1]
-        add(1 if a[2] == "bullish" else -1, f"absorption at {a[1]:.2f} ({a[3]})")
-
-    if sweeps:
-        s = sweeps[-1]
-        add(1 if s[1] == "bullish" else -1, f"liquidity sweep: {s[2]}")
-
-    bull_fvg = [g for g in fvgs if g[1] == "bullish" and g[3] < price]
-    bear_fvg = [g for g in fvgs if g[1] == "bearish" and g[2] > price]
-    if len(bull_fvg) > len(bear_fvg):
-        add(1, f"{len(bull_fvg)} unfilled bullish FVG(s) below price")
-    elif len(bear_fvg) > len(bull_fvg):
-        add(-1, f"{len(bear_fvg)} unfilled bearish FVG(s) above price")
-
-    for side, name in pats:
-        if side != "neutral":
-            add(1 if side == "bullish" else -1, name)
-
-    if lv["ORH"] is not None:
-        if price > lv["ORH"]:
-            add(1, f"above opening range high {lv['ORH']:.2f}")
-        elif price < lv["ORL"]:
-            add(-1, f"below opening range low {lv['ORL']:.2f}")
-
-    news_total = sum(s for s, _ in news)
-    if news_total:
-        add(1 if news_total > 0 else -1, f"news sentiment {news_total:+d}")
-
-    # ----- Print -----
     print(f"\n=== {SYMBOL} @ {price:.2f}   ({last_ts:%Y-%m-%d %H:%M} ET) ===")
     kz = in_killzone(last_ts)
     print(f"Session: {kz or 'outside main NY windows (lower quality)'}")
@@ -257,17 +283,10 @@ def main():
         print("  none returned")
 
     print("\nConfluence")
-    for r in reasons:
-        print("  " + r)
-    print(f"  TOTAL: {score:+d}")
-
-    if score >= MIN_SCORE:
-        verdict = "LONG bias - look for entries at nearest HVN / bullish FVG below"
-    elif score <= -MIN_SCORE:
-        verdict = "SHORT bias - look for entries at nearest HVN / bearish FVG above"
-    else:
-        verdict = "NO CLEAR EDGE - stand aside"
-    print(f"\n>>> {verdict}\n")
+    for _, p, why in r["factors"]:
+        print(f"  {'+' if p > 0 else ''}{p}  {why}")
+    print(f"  TOTAL: {r['score']:+d}")
+    print(f"\n>>> {verdict(r['score'])}\n")
 
 
 if __name__ == "__main__":
