@@ -1,6 +1,6 @@
 # SCANNER — HVN Breakout Scanner
 
-Educational study tool for NQ / MNQ futures on the 1-minute chart (also works on BTC). It runs inside TradingView, simulates trades in the Strategy Tester, and **never places real orders**. Not financial advice.
+Educational study tool for Bitcoin on the 1-minute chart. It runs inside TradingView, simulates trades in the Strategy Tester, and **never places real orders**. Not financial advice.
 
 ## The rules
 
@@ -26,7 +26,7 @@ Educational study tool for NQ / MNQ futures on the 1-minute chart (also works on
 
 Script: [`pine/hvn_breakout_scanner.pine`](pine/hvn_breakout_scanner.pine)
 
-1. On a computer at tradingview.com, open `MNQ1!` or `NQ1!` on the **1-minute** chart.
+1. On a computer at tradingview.com, open **`BINANCE:BTCUSDT`** (or `COINBASE:BTCUSD`, `BYBIT:BTCUSDT.P`) on the **1-minute** chart. Use an exchange symbol, not an index like `CRYPTO:BTCUSD`: the HVN zones need real volume.
 2. **Pine Editor** (bottom) → delete the template → paste the script → **Save** → **Add to chart**.
 3. Open **Strategy Tester** for the results. The table on the chart shows trades, win rate and total R for the window.
 
@@ -34,16 +34,16 @@ Once added, it shows in the phone app too.
 
 **Settings worth knowing** (gear icon):
 
-- *Simulate the last N hours* — default 24. NQ is closed on weekends, so raise it (e.g. 120) to get enough trades. Free plans load fewer 1m bars.
-- *Only signal during* — all hours, NY regular hours, or the 09:30–11:00 killzone.
+- *Simulate the last N hours* — default 24. Raise it (e.g. 72–168) for more trades; free plans load fewer 1m bars.
+- *Only signal during* — all hours (default; BTC trades 24/7), NY stock-market hours, or the 09:30–11:00 ET killzone, when BTC volume is usually highest.
 - *Only auto-take breakouts that agree with 15m structure* — off by default.
-- Sizing is 1 contract; slippage is 2 ticks per fill (1 NQ point round trip). Change in **Properties**.
+- Sizing is 10% of equity; costs are 0.1% commission per fill (typical taker fee). Set your exchange's fee in **Properties**. On 1m trades fees matter a lot: 0.2% round trip is ~$190 on a $95k BTC move, so a target only a few hundred dollars away loses a big share to fees.
 
 **Phone alerts:** Alert (clock icon) → Condition: **HVN Breakout** → **alert() function calls only** → turn on **Notify in app**. You'll get the side, probability, entry, stop and target for every trade taken. Turn on *Also alert on probability-only signals* in settings to get the grey ones too.
 
 ## Reading the results
 
-- Judge it in **R**, not dollars: avg R per trade above 0 after costs is the bar to clear.
+- Judge it in **R**: avg R per trade above 0 after fees is the bar to clear. The chart table's R uses actual fill prices but not commission, so also check Net profit in the Strategy Tester, which includes fees.
 - A handful of trades over a day or two is noise. Look at 50+ trades before trusting it.
 - Try the 15m-structure filter on and off, and the session filter, and compare total R.
 

@@ -1,5 +1,5 @@
 //@version=6
-// HVN Breakout Scanner — NQ / MNQ 1m (also works on BTC and other 24h markets)
+// HVN Breakout Scanner — BTC 1m
 // Rules (from Cole):
 //  • HVN zones built from the last 2 hours; zone top/bottom = highest/lowest CLOSE inside the high-volume area
 //  • Breakout: candle 1 closes outside the zone, candle 2 closes even further out → confirmed at candle 2's close
@@ -9,13 +9,15 @@
 //  • Target = next HVN's midpoint; if there isn't one, 2R
 // Simulation only — places no real orders. Educational, not financial advice.
 //
-// Sizing: 1 contract per trade (set in Properties). Results are tracked in R, so size doesn't change them.
-// Costs: 2 ticks slippage per fill (= 1 NQ point round trip). Add commission in Properties if you want it.
+// Use a symbol with real exchange volume (e.g. BINANCE:BTCUSDT, COINBASE:BTCUSD, BYBIT:BTCUSDT.P),
+// not an index like CRYPTO:BTCUSD — HVN zones need volume.
+// Sizing: 10% of equity per trade. Results are tracked in R, so size doesn't change them.
+// Costs: 0.1% commission per fill (typical exchange taker fee). Change it in Properties for your exchange.
 
-strategy("HVN Breakout Scanner (1m)", shorttitle = "HVN Breakout", overlay = true, process_orders_on_close = true,
+strategy("HVN Breakout Scanner (BTC 1m)", shorttitle = "HVN Breakout", overlay = true, process_orders_on_close = true,
      max_bars_back = 1000, max_labels_count = 500, max_boxes_count = 200,
-     initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1,
-     slippage = 2, commission_type = strategy.commission.cash_per_contract, commission_value = 0.0, pyramiding = 0)
+     initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10,
+     commission_type = strategy.commission.percent, commission_value = 0.1, pyramiding = 0)
 
 // ───────────────────────── Inputs ─────────────────────────
 grpW      = "Simulation window"
