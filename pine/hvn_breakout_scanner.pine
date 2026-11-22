@@ -37,6 +37,7 @@ stopMode  = input.string("Candle 1", "Stop placement", options = ["Candle 1", "Z
 fallbackR = input.float(2.0, "Target R when there is no next HVN", minval = 0.5, step = 0.5, group = grpB)
 needTrend = input.bool(false, "Only auto-take big breakouts that agree with 15m structure", group = grpB)
 noTrap    = input.bool(true, "Skip trap-sweep breakouts (candle swept a level and closed back)", group = grpB)
+noWeekend = input.bool(true, "No trades on Saturday / Sunday (ET)", group = grpB)
 minProb   = input.float(0, "Only auto-take if score ≥ (0 = off)", minval = 0, maxval = 95, step = 5, group = grpB)
 minTgtPct = input.float(0.0, "Skip trades whose target is closer than x% (0 = off; fees are ~0.2% round trip)", minval = 0, step = 0.1, group = grpB)
 stopBuf   = input.float(0.0, "Extra stop buffer (x ATR beyond the stop level)", minval = 0, step = 0.25, group = grpB)
@@ -198,6 +199,9 @@ bool inSess = sessMode == "All hours" ? true :
      sessMode == "London (03:00-09:00 ET)" ? not na(time(timeframe.period, "0300-0900", TZ)) :
      sessMode == "NY RTH (09:30-16:00 ET)" ? not na(time(timeframe.period, "0930-1600", TZ)) :
      not na(time(timeframe.period, "0930-1100", TZ))
+int  etDow     = dayofweek(time, TZ)                        // 1 = Sunday … 7 = Saturday
+bool isWeekend = etDow == dayofweek.sunday or etDow == dayofweek.saturday
+inSess := inSess and not (noWeekend and isWeekend)
 
 var int   trades    = 0
 var int   wins      = 0
