@@ -12,12 +12,12 @@
 // Use a symbol with real exchange volume (e.g. BINANCE:BTCUSDT, COINBASE:BTCUSD, BYBIT:BTCUSDT.P),
 // not an index like CRYPTO:BTCUSD — HVN zones need volume.
 // Sizing: 10% of equity per trade. Results are tracked in R, so size doesn't change them.
-// Costs: 0.1% commission per fill (typical exchange taker fee). Change it in Properties for your exchange.
+// Costs: set to 0 to study patterns without fees (research decision 2026-11-22). Real exchanges charge ~0.1% per fill.
 
 strategy("HVN Breakout Scanner (BTC 1m)", shorttitle = "HVN Breakout", overlay = true, process_orders_on_close = true,
      max_bars_back = 1000, max_labels_count = 500, max_boxes_count = 300, max_lines_count = 300,
      initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10,
-     commission_type = strategy.commission.percent, commission_value = 0.1, pyramiding = 0)
+     commission_type = strategy.commission.percent, commission_value = 0.0, pyramiding = 0)
 
 // ───────────────────────── Inputs ─────────────────────────
 grpW      = "Simulation window"
@@ -67,7 +67,7 @@ relVolMin = input.float(1.5, "High volume = breakout candles' avg volume ≥ x t
 extAtr    = input.float(2.0, "Extended = candle-2 close more than x ATR past the zone edge", minval = 0.5, step = 0.25, group = grpC)
 
 grpX      = "Signal tracking (measured win rates)"
-feePct    = input.float(0.1, "Fee per fill % used in the stats (match Properties → Commission)", minval = 0, step = 0.01, group = grpX)
+feePct    = input.float(0.0, "Fee per fill % used in the stats (match Properties → Commission)", minval = 0, step = 0.01, group = grpX)
 maxHold   = input.int(240, "Signal outcome: give up after N bars (scored at that bar's close)", minval = 5, group = grpX)
 minN      = input.int(10, "Minimum resolved signals before a win rate is shown", minval = 1, group = grpX)
 needEdge  = input.bool(false, "Only auto-take if this signal's score band has made money so far (avg R > 0)", group = grpX)
