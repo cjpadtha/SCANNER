@@ -52,9 +52,10 @@ Once added, it shows in the phone app too.
 
 ## Reading the results
 
-- Judge it in **R**: avg R per trade above 0 after fees is the bar to clear. The chart table's R uses actual fill prices but not commission, so also check Net profit in the Strategy Tester, which includes fees.
+- Judge it in **R**: avg R per trade above 0 after fees is the bar to clear. The chart table's R is after commission, so it matches the Strategy Tester.
 - A handful of trades over a day or two is noise. Look at 50+ trades before trusting it.
 - Try the 15m-structure filter on and off, and the session filter, and compare total R.
+- 1m stops are tight, so fees can be a full R or more. Test: set commission to 0 in Properties to see the edge before fees, then try *Skip trades whose target is closer than x%* (e.g. 0.5), *Extra stop buffer* (e.g. 0.5 ATR) and *Only auto-take if probability ≥* (e.g. 70). Change one at a time over the same window.
 
 ## Python (older confluence model)
 
