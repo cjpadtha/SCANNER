@@ -1,0 +1,154 @@
+//@version=6
+// Educational study tool. Not financial advice. Past results do not predict future results.
+// Same scoring as nq_scanner.py (POC, liquidity sweep, FVGs, engulfing, opening range).
+// News is not available in Pine Script, so it is not part of the score.
+// Backtest: enter when |score| first reaches the threshold, exit after N bars or at 15:55 ET.
+// Default costs: 2 ticks slippage per fill (= 1 point round trip, same as backtest.py).
+// Adjust commission / slippage / contract size in the strategy's Properties tab.
+strategy("NQ Confluence Strategy", shorttitle = "NQ Confluence Strat", overlay = true, max_bars_back = 5000, process_orders_on_close = true, slippage = 2, commission_type = strategy.commission.cash_per_contract, commission_value = 0.0, default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0)
+
+// ================= Inputs =================
+string TZ          = "America/New_York"
+int   lookbackDays = input.int(5, "Volume profile lookback (days)", minval = 1, maxval = 20)
+float binSize      = input.float(5.0, "Profile bin size (points)", minval = 0.25)
+int   minScore     = input.int(3, "Confluence needed for a bias", minval = 1, maxval = 5)
+int   sweepBars    = input.int(6, "Sweep counts for (bars)", minval = 1)
+int   fvgKeep      = input.int(5, "Recent unfilled FVGs scored", minval = 1, maxval = 20)
+bool  rthOnly      = input.bool(true, "Signals only 09:35-15:55 ET")
+
+// ~23 trading hours per futures day, capped by Pine's history limit
+int lookback = math.min(4900, int(math.round(lookbackDays * 23.0 * 3600.0 / timeframe.in_seconds())))
+
+// ================= 1. Volume profile (rolling, incremental) =================
+var map<int, float> prof = map.new<int, float>()
+int kNow = math.round(hlc3 / binSize)
+prof.put(kNow, nz(prof.get(kNow)) + nz(volume))
+if bar_index >= lookback
+    int kOld = math.round(hlc3[lookback] / binSize)
+    float remaining = nz(prof.get(kOld)) - nz(volume[lookback])
+    if remaining <= 1e-9
+        prof.remove(kOld)
+    else
+        prof.put(kOld, remaining)
+
+float pocVol = -1.0
+int pocKey = na
+for [k, v] in prof
+    if v > pocVol
+        pocVol := v
+        pocKey := k
+float poc = na(pocKey) ? na : pocKey * binSize
+
+// ================= 2. Key levels =================
+float pdh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_on)
+float pdl = request.security(syminfo.tickerid, "D", low[1], lookahead = barmerge.lookahead_on)
+bool newDay = timeframe.change("D")     // CME futures day starts 18:00 ET
+
+bool inOR = not na(time(timeframe.period, "0930-1000", TZ))
+var float orh = na
+var float orl = na
+if newDay
+    orh := na
+    orl := na
+if inOR
+    orh := na(orh) ? high : math.max(orh, high)
+    orl := na(orl) ? low : math.min(orl, low)
+
+// ================= 3. Liquidity sweeps (only recent ones count) =================
+var int sweepBar = na
+var int sweepDir = 0
+if newDay
+    sweepBar := na
+    sweepDir := 0
+if high > pdh and close < pdh
+    sweepBar := bar_index
+    sweepDir := -1
+if low < pdl and close > pdl
+    sweepBar := bar_index
+    sweepDir := 1
+bool sweepActive = not na(sweepBar) and bar_index - sweepBar <= sweepBars - 1
+
+// ================= 4. Fair value gaps =================
+var array<float> fTop = array.new<float>()
+var array<float> fBot = array.new<float>()
+var array<int>   fDir = array.new<int>()
+var array<int>   fBar = array.new<int>()
+
+// drop gaps this bar filled, or that fell out of the lookback window
+if fDir.size() > 0
+    for i = fDir.size() - 1 to 0
+        bool filled = fDir.get(i) == 1 ? low <= fBot.get(i) : high >= fTop.get(i)
+        if filled or bar_index - fBar.get(i) > lookback
+            fTop.remove(i)
+            fBot.remove(i)
+            fDir.remove(i)
+            fBar.remove(i)
+
+if low > high[2]
+    fTop.push(low)
+    fBot.push(high[2])
+    fDir.push(1)
+    fBar.push(bar_index)
+else if high < low[2]
+    fTop.push(low[2])
+    fBot.push(high)
+    fDir.push(-1)
+    fBar.push(bar_index)
+if fDir.size() > 60
+    fTop.shift()
+    fBot.shift()
+    fDir.shift()
+    fBar.shift()
+
+int bullFvg = 0
+int bearFvg = 0
+int fvgStart = math.max(0, fDir.size() - fvgKeep)
+if fDir.size() > 0
+    for i = fvgStart to fDir.size() - 1
+        if fDir.get(i) == 1 and fTop.get(i) < close
+            bullFvg += 1
+        if fDir.get(i) == -1 and fBot.get(i) > close
+            bearFvg += 1
+
+// ================= 5. Patterns =================
+bool bullEng = close > open and close[1] < open[1] and close >= open[1] and open <= close[1]
+bool bearEng = close < open and close[1] > open[1] and close <= open[1] and open >= close[1]
+
+// ================= Score =================
+int fPoc   = na(poc) ? 0 : close > poc ? 1 : -1
+int fSweep = sweepActive ? sweepDir : 0
+int fFvg   = bullFvg > bearFvg ? 1 : bearFvg > bullFvg ? -1 : 0
+int fEng   = (bullEng ? 1 : 0) - (bearEng ? 1 : 0)
+int fOr    = na(orh) ? 0 : close > orh ? 1 : close < orl ? -1 : 0
+int score  = fPoc + fSweep + fFvg + fEng + fOr
+
+bool inRTH     = not na(time(timeframe.period, "0935-1600", TZ))
+bool canSignal = not rthOnly or inRTH
+int  side      = score >= minScore ? 1 : score <= -minScore ? -1 : 0
+bool longSig   = canSignal and side == 1 and side[1] != 1
+bool shortSig  = canSignal and side == -1 and side[1] != -1
+
+// ================= Trades =================
+int holdBars = input.int(12, "Exit after (bars)", minval = 1, group = "Trades")
+bool allowLong  = input.bool(true, "Take longs", group = "Trades")
+bool allowShort = input.bool(true, "Take shorts", group = "Trades")
+
+bool lastBarOfDay = not na(time(timeframe.period, "1555-1600", TZ))
+var int entryBar = na
+
+if longSig and allowLong and not lastBarOfDay
+    strategy.entry("Long", strategy.long)
+    entryBar := bar_index
+if shortSig and allowShort and not lastBarOfDay
+    strategy.entry("Short", strategy.short)
+    entryBar := bar_index
+
+if strategy.position_size != 0 and not na(entryBar) and bar_index - entryBar >= holdBars
+    strategy.close_all(comment = "time exit")
+if lastBarOfDay and strategy.position_size != 0
+    strategy.close_all(comment = "session end")
+
+plot(poc, "POC", color.orange, 2, plot.style_linebr)
+plot(pdh, "PDH", color.new(color.red, 30), 1, plot.style_linebr)
+plot(pdl, "PDL", color.new(color.green, 30), 1, plot.style_linebr)
+plot(score, "Score", display = display.data_window)
