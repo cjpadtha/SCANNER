@@ -8,12 +8,14 @@
 //  ORB15  09:30-09:45 range; first 5m close beyond it before 11:30 → enter; stop = other side; target 2R
 //  ORB30  09:30-10:00 range; first 5m close beyond it before 11:30 → enter; stop = range midpoint; hold to the close
 //  SWEEP  price runs the overnight (18:00-09:30) high/low after the open, then a 5m candle closes back inside → fade; stop = sweep extreme; target 1.5R
+//  HVN    (secondary, only as a "first trade of the day" candidate) 2h HVN zone; candle 1 closes outside, candle 2 further out with a body
+//         >= 0.25 ATR, 09:30-11:00, no trap sweep → enter; stop beyond candle 1; trailing stop 2 ATR once +1R (vault's 4-year HVN version)
 //  IMOM   direction from yesterday's 16:00 close to 10:00 → enter at 15:30 in that direction; stop 0.25 x average daily range; exit at the close
 // Filters  daily trend (prior daily close vs 20-day EMA) · 15-minute structure · VWAP side (session VWAP from 09:30) · order flow (last 30 min of 1m candles)
 // ★ MAIN (Cole's main model) = up to 2 trades a day, one position at a time:
 //   ① ORB15 whenever the daily trend AND the 15-minute structure agree with the breakout, plus
 //   ② the first signal of the day (ORB15 / SWEEP / ORB30 / IMOM) in the daily trend's direction, if it's a different trade.
-// "First trade of the day" = the first ORB15 / ORB30 / SWEEP / IMOM signal that passes the filter; one trade per day.
+// "First trade of the day" = the first ORB15 / HVN / SWEEP / ORB30 / IMOM signal that passes the filter; one trade per day.
 // The vault versions also use HVN and value-area candidates — this TradingView version leaves those out, so results differ a little.
 
 strategy("NQ Model Library (MNQ 5m)", shorttitle = "NQ Models", overlay = true, process_orders_on_close = true,
@@ -195,6 +197,89 @@ if isRth and mn == 925 and not doneIMOM and not na(c10) and not na(pdC) and not 
     stIMOM := close - sigIMOM * 0.25 * avgRange
     doneIMOM := true
 
+// HVN breakout (same rules as the vault's 4-year HVN model: zones from the 24 bars before candle 1, top/bottom = highest/lowest close)
+float atr14 = ta.atr(14)
+f_zones(int off, int n, int nRows, float mult) =>
+    float hi = high[off]
+    float lo = low[off]
+    for i = off to off + n - 1
+        hi := math.max(hi, high[i])
+        lo := math.min(lo, low[i])
+    float step = (hi - lo) / nRows
+    vols = array.new_float(nRows, 0.0)
+    cMax = array.new_float(nRows, na)
+    cMin = array.new_float(nRows, na)
+    tops = array.new_float()
+    bots = array.new_float()
+    if step > 0
+        for i = off to off + n - 1
+            int idx = math.max(0, math.min(nRows - 1, math.floor((close[i] - lo) / step)))
+            array.set(vols, idx, array.get(vols, idx) + nz(volume[i]))
+            float cx = array.get(cMax, idx)
+            array.set(cMax, idx, na(cx) ? close[i] : math.max(cx, close[i]))
+            float cn = array.get(cMin, idx)
+            array.set(cMin, idx, na(cn) ? close[i] : math.min(cn, close[i]))
+        float thr = array.avg(vols) * mult
+        float gTop = na
+        float gBot = na
+        for r = 0 to nRows - 1
+            float v = array.get(vols, r)
+            bool isH = v > 0 and v >= thr
+            if isH
+                gTop := na(gTop) ? array.get(cMax, r) : math.max(gTop, array.get(cMax, r))
+                gBot := na(gBot) ? array.get(cMin, r) : math.min(gBot, array.get(cMin, r))
+            if (not isH or r == nRows - 1) and not na(gTop)
+                array.push(tops, gTop)
+                array.push(bots, gBot)
+                gTop := na
+                gBot := na
+    [tops, bots]
+
+// liquidity sweeps on the chart (for the trap-sweep check): wick through the last swing, close back inside
+float hvPh = ta.pivothigh(high, 5, 5)
+float hvPl = ta.pivotlow(low, 5, 5)
+var float hvSwH = na
+var float hvSwL = na
+var int bullSwBar = na
+var int bearSwBar = na
+if not na(hvSwL)
+    if low < hvSwL and close > hvSwL
+        bullSwBar := bar_index
+        hvSwL := na
+    else if close < hvSwL
+        hvSwL := na
+if not na(hvSwH)
+    if high > hvSwH and close < hvSwH
+        bearSwBar := bar_index
+        hvSwH := na
+    else if close > hvSwH
+        hvSwH := na
+if not na(hvPh)
+    hvSwH := hvPh
+if not na(hvPl)
+    hvSwL := hvPl
+
+int sigHVN = 0
+float stHVN = na
+[zt, zb] = f_zones(2, 24, 30, 1.5)                          // every bar (functions that look back must run on every bar)
+if isRth and mn < 660 and bar_index > 30
+    int hd = 0
+    if array.size(zt) > 0
+        for k = 0 to array.size(zt) - 1
+            float t = array.get(zt, k)
+            float b = array.get(zb, k)
+            if close[2] >= b and close[2] <= t
+                if close[1] > t and close > close[1]
+                    hd := 1
+                else if close[1] < b and close < close[1]
+                    hd := -1
+    if hd != 0
+        bool bigC = hd == 1 ? close - open >= 0.25 * atr14 : open - close >= 0.25 * atr14
+        bool trap = hd == 1 ? (not na(bearSwBar) and bar_index - bearSwBar <= 1) : (not na(bullSwBar) and bar_index - bullSwBar <= 1)
+        if bigC and not trap
+            sigHVN := hd
+            stHVN := hd == 1 ? low[1] : high[1]
+
 // filter: "daily", "m15", "both", "vwap", "flow", "none"
 f_pass(string flt, int d) =>
     flt == "daily" ? dTrend == d : flt == "m15" ? s15 == d : flt == "both" ? (dTrend == d and s15 == d) :
@@ -216,6 +301,11 @@ if mainA or ((mSetup == "ORB15" or firstLike) and sigORB15 != 0 and f_pass(mFilt
     stp := stORB15
     tgt := close + d * 2.0 * math.abs(close - stp)
     why := "ORB15"
+else if firstLike and sigHVN != 0 and f_pass(mFilt, sigHVN)
+    d := sigHVN
+    stp := stHVN
+    tgt := na
+    why := "HVN"
 else if (mSetup == "SWEEP" or firstLike) and sigSWEEP != 0 and f_pass(mFilt, sigSWEEP)
     d := sigSWEEP
     stp := stSWEEP
@@ -240,6 +330,9 @@ var float pEntry = na
 var float pRisk = na
 var int   pDir = 0
 var int   lastClosed = 0
+var bool  pTrail = false
+var float pBest = na
+var float pStop = na
 bool showPos = input.bool(true, "Position boxes (TP green, SL red, entry line, result)", group = "Display (keep it clean)")
 
 bool canTrade = inWindow and strategy.position_size == 0 and not (mSetup == "FIRST" and tradedToday) and (d == 1 ? stp < close : stp > close)
@@ -258,6 +351,9 @@ if d != 0 and canTrade
     pEntry := close
     pRisk := math.abs(close - stp)
     pDir := d
+    pTrail := why == "HVN"
+    pBest := close
+    pStop := stp
     if showPos
         pSl := box.new(bar_index, math.max(close, stp), bar_index + 1, math.min(close, stp), border_color = color.new(color.red, 60), bgcolor = color.new(color.red, 80))
         pTp := na(tgt) ? na : box.new(bar_index, math.max(close, tgt), bar_index + 1, math.min(close, tgt), border_color = color.new(color.green, 60), bgcolor = color.new(color.green, 80))
@@ -272,6 +368,14 @@ if d != 0 and canTrade
          " · VWAP " + ((close - vwap) * d > 0 ? "with" : "against") + " · flow " + str.tostring(flow30 * d, "#.##"))
 if strategy.position_size != 0 and isRth and mn >= 955
     strategy.close_all(comment = "")
+
+// HVN trades: trailing stop 2 ATR once the trade has gone +1R (same as the vault)
+if strategy.position_size != 0 and pTrail and not na(pSl) and bar_index > box.get_left(pSl)
+    pBest := pDir == 1 ? math.max(pBest, high) : math.min(pBest, low)
+    if (pBest - pEntry) * pDir >= pRisk
+        float lvl = pBest - pDir * 2.0 * atr14
+        pStop := pDir == 1 ? math.max(pStop, lvl) : math.min(pStop, lvl)
+        strategy.exit(pDir == 1 ? "LX" : "SX", pDir == 1 ? "L" : "S", stop = pStop)
 
 // stretch the open trade's boxes; on exit, stop them at the exit bar and print the result in R
 if strategy.position_size != 0 and not na(pSl) and bar_index > box.get_left(pSl)
