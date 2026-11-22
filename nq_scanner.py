@@ -27,6 +27,7 @@ PERIOD = "5d"
 BIN_SIZE = 5.0           # points per volume-profile bucket
 TZ = "America/New_York"
 MIN_SCORE = 3            # confluence needed before calling a bias
+SWEEP_BARS = 6           # a liquidity sweep counts only within this many bars (6 x 5m = 30 min)
 
 BULL_WORDS = ["beat", "beats", "surge", "rally", "record", "gain", "gains", "jump", "rises",
               "upgrade", "strong", "cooling inflation", "rate cut", "soars", "rebound"]
@@ -180,9 +181,12 @@ def score_window(df, news=None):
 
     add("poc", 1 if price > poc else -1, f"price {'above' if price > poc else 'below'} POC {poc:.2f}")
 
-    if sweeps:
-        s = sweeps[-1]
-        add("sweep", 1 if s[1] == "bullish" else -1, f"liquidity sweep: {s[2]}")
+    # Only a recent sweep counts; one from hours ago no longer says much.
+    cutoff = df.index[-1] - pd.Timedelta(INTERVAL) * (SWEEP_BARS - 1)
+    recent_sweeps = [sw for sw in sweeps if sw[0] >= cutoff]
+    if recent_sweeps:
+        s = recent_sweeps[-1]
+        add("sweep", 1 if s[1] == "bullish" else -1, f"liquidity sweep at {s[0]:%H:%M}: {s[2]}")
 
     bull_fvg = [g for g in fvgs if g[1] == "bullish" and g[3] < price]
     bear_fvg = [g for g in fvgs if g[1] == "bearish" and g[2] > price]
