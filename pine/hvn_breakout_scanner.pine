@@ -575,12 +575,14 @@ if inWindow and inSess and bar_index > profBars + 5
 bgcolor(showTrend and inWindow ? (htfTrend == 1 ? color.new(color.green, 94) : htfTrend == -1 ? color.new(color.red, 94) : na) : na, title = "15m structure")
 bgcolor(inWindow and not inWindow[1] ? color.new(color.yellow, 60) : na, title = "Window start")
 
+bool atLastBar = barstate.islastconfirmedhistory or barstate.isrealtime   // newest closed bar (no calc_on_every_tick warning)
+
 // Current HVN zones (last 2h): green = support below price, red = resistance above, orange = price inside.
 // Dotted line = zone midpoint (the trade target). Label = price range and share of the 2h volume.
 var array<box>   zoneBoxes = array.new<box>()
 var array<line>  zoneMids  = array.new<line>()
 var array<label> zoneLbls  = array.new<label>()
-if barstate.islast and showZones
+if atLastBar and showZones
     for bx in zoneBoxes
         box.delete(bx)
     for ln in zoneMids
@@ -615,7 +617,7 @@ if barstate.islast and showZones
 
 string tblPos = tblPosIn == "Top right" ? position.top_right : tblPosIn == "Bottom left" ? position.bottom_left : position.bottom_right
 var table tb = table.new(tblPos, 2, 6, bgcolor = color.new(color.black, 30), border_width = 0)
-if barstate.islast and tblPosIn != "Hidden"
+if atLastBar and tblPosIn != "Hidden"
     color w  = color.new(color.white, 10)
     color dm = color.new(color.gray, 0)
     ts = size.small
@@ -649,7 +651,7 @@ f_head(table t, int r, string txt) =>
 string sPos = statsPos == "Top left" ? position.top_left : statsPos == "Top right" ? position.top_right : position.bottom_left
 var table st = table.new(sPos, 5, 23, bgcolor = color.new(color.black, 25), border_width = 0)
 varip bool stMerged = false
-if barstate.islast and showStats
+if atLastBar and showStats
     color w = color.white
     table.cell(st, 0, 0, "What really happened (all signals, after fees)", text_color = w, text_size = size.small, text_halign = text.align_left)
     table.cell(st, 0, 1, "", text_size = size.tiny)
@@ -674,7 +676,7 @@ if barstate.islast and showStats
     f_row(st, 21, "NY 09:30–16:00", array.get(sN, 2), array.get(sW, 2), array.get(sR, 2), "", w)
     table.cell(st, 0, 22, "A check helps if its avg R is clearly above 'avg R without'. Need ~30+ in a row to trust it.",
          text_color = color.gray, text_size = size.tiny, text_halign = text.align_left)
-if barstate.islast and showStats and not stMerged
+if atLastBar and showStats and not stMerged
     // merge header / note rows once (merging the same cells twice can error)
     for r in array.from(0, 3, 8, 18, 22)
         table.merge_cells(st, 0, r, 4, r)
