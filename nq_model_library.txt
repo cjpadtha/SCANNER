@@ -11,6 +11,7 @@
 //  HVN    (secondary, only as a "first trade of the day" candidate) 2h HVN zone; candle 1 closes outside, candle 2 further out with a body
 //         >= 0.25 ATR, 09:30-11:00, no trap sweep, no opposite-side sweep in the last 30 bars → enter; stop beyond candle 1; trailing stop 2 ATR once +1R (vault's 4-year HVN version)
 //  IMOM   direction from yesterday's 16:00 close to 10:00 → enter at 15:30 in that direction; stop 0.25 x average daily range; exit at the close
+// ★ MAIN ③ overnight (fallback, 2026-11-22): long 18:00→09:25 ET if the daily trend is up and today's MAIN didn't finish positive; stop 0.5× 20d avg overnight range.
 // Filters  daily trend (prior daily close vs 20-day EMA) · 15-minute structure · VWAP side (session VWAP from 09:30) · order flow (last 30 min of 1m candles)
 // ★ MAIN (Cole's main model) = up to 2 trades a day, one position at a time:
 //   ① ORB15 whenever the daily trend AND the 15-minute structure agree with the breakout, plus
@@ -42,6 +43,8 @@ simDays  = input.int(30, "Simulate the last N days", minval = 1, maxval = 120)
 riskUsd  = input.float(500, "Risk per trade ($) — contracts = risk ÷ (stop points × point value)", minval = 50, step = 50,
      tooltip = "Topstep 50K research: $500 ≈ 54% pass / 34% blown over 2026 starts (typically 4–8 weeks). $300 = fewer blow-ups, slower. 3-day passes aren't realistic with this model.")
 maxQty   = input.int(50, "Max contracts (Topstep 50K: 50 micros)", minval = 1)
+useON    = input.bool(true, "★ MAIN ③ overnight leg (fallback)", tooltip = "Added 2026-11-22 (Cole). At 18:00 ET go LONG only if the daily trend is up AND today's MAIN trades did not finish positive (no trade, or net ≤ 0). Stop = 0.5 × 20-day average overnight range; exit 09:25 ET. Test 2023–26: Topstep pass 47% / 72% / 82% (2023-24 / 2025 / 2026) vs MAIN alone 35% / 23% / 88%.")
+onK      = input.float(0.5, "Overnight stop = k × 20-day avg overnight range", step = 0.05)
 grpD     = "Display (keep it clean)"
 showOR   = input.bool(true, "Today's 15-min opening range", group = grpD)
 showVW   = input.bool(true, "Today's VWAP", group = grpD)
@@ -113,6 +116,8 @@ var bool doneSWEEP = false
 var bool doneIMOM = false
 var bool tradedToday = false
 var bool tradedA = false
+var float dayR = 0.0          // today's MAIN day-session result in R (for the overnight fallback)
+var bool pIsON = false
 var float sweepHi = na
 var float sweepLo = na
 
@@ -147,6 +152,7 @@ if rthStart
     doneIMOM := false
     tradedToday := false
     tradedA := false
+    dayR := 0.0
     sweepHi := high
     sweepLo := low
 if isRth
@@ -409,10 +415,55 @@ if strategy.closedtrades > lastClosed
         line.set_x2(pEn, xb)
         label.new(xb, ex, (rRes >= 0 ? "+" : "") + str.tostring(rRes, "#.0") + "R", style = label.style_label_left,
              color = rRes >= 0 ? color.new(color.green, 15) : color.new(color.red, 15), textcolor = color.white, size = size.small)
+    if not pIsON
+        dayR += rRes
+    pIsON := false
     pSl := na
     pTp := na
     pEn := na
     lastClosed := strategy.closedtrades
+
+// ───────────────────────── ★ MAIN ③ overnight leg (fallback) ─────────────────────────
+var float onHi = na
+var float onLo = na
+var array<float> onRngs = array.new_float()
+bool onStart = mn >= 1080 and mn[1] < 1080 and dayofweek(time, TZ) != dayofweek.friday
+bool onEnd = mn >= 565 and mn < 960
+if onStart
+    onHi := high
+    onLo := low
+else if not na(onHi) and not onEnd
+    onHi := math.max(onHi, high)
+    onLo := math.min(onLo, low)
+if onEnd and not na(onHi)
+    array.push(onRngs, onHi - onLo)
+    if array.size(onRngs) > 20
+        array.shift(onRngs)
+    onHi := na
+    onLo := na
+float onAvg = array.size(onRngs) >= 10 ? array.avg(onRngs) : na
+if useON and mSetup == "MAIN" and onStart and inWindow and strategy.position_size == 0 and dTrend == 1 and dayR <= 0 and not na(onAvg)
+    float oRisk = onK * onAvg
+    float oStp = close - oRisk
+    int oQty = int(math.max(1, math.min(maxQty, math.floor(riskUsd / (oRisk * syminfo.pointvalue)))))
+    strategy.entry("ON", strategy.long, qty = oQty, comment = "")
+    strategy.exit("ONX", "ON", stop = oStp)
+    pEntry := close
+    pRisk := oRisk
+    pDir := 1
+    pTrail := false
+    pBest := close
+    pStop := oStp
+    pIsON := true
+    if showPos
+        pSl := box.new(bar_index, close, bar_index + 1, oStp, border_color = color.new(color.red, 60), bgcolor = color.new(color.red, 80))
+        pTp := na
+        pEn := line.new(bar_index, close, bar_index + 1, close, color = color.new(color.white, 20), width = 1)
+    label.new(bar_index, low, "BUY ON", style = label.style_label_up, color = color.new(color.teal, 10), textcolor = color.white, size = size.tiny,
+         tooltip = "★ MAIN ③ overnight leg\nEntry " + str.tostring(close, format.mintick) + "\nStop " + str.tostring(oStp, format.mintick) + "\nNo target: exit 09:25 ET\nToday's MAIN result " + str.tostring(dayR, "#.0") + "R")
+    alert("MAIN ③ overnight: LONG MNQ " + str.tostring(oQty) + " @ " + str.tostring(close, format.mintick) + " stop " + str.tostring(oStp, format.mintick) + " exit 09:25 ET", alert.freq_once_per_bar_close)
+if pIsON and strategy.position_size > 0 and mn >= 565 and mn < 960
+    strategy.close("ON", comment = "")
 
 // other models' raw signals as small dots (grey = filtered out for the selected model)
 if showAll and inWindow
