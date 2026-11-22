@@ -44,7 +44,7 @@ showPD   = input.bool(false, "Prior day high / low", group = grpD)
 showOR30 = input.bool(false, "30-min opening range", group = grpD)
 showAll  = input.bool(false, "Dots for other models' signals", group = grpD)
 showTbl  = input.string("Compact", "Info box", options = ["Compact", "Full ranking", "Hidden"], group = grpD)
-tblPos   = input.string("Bottom right", "Info box position", options = ["Top right", "Bottom right", "Bottom left", "Top left"], group = grpD)
+tblPos   = input.string("Top right", "Info box position", options = ["Top right", "Bottom right", "Bottom left", "Top left"], group = grpD)
 
 string TZ = "America/New_York"
 int mn = hour(time, TZ) * 60 + minute(time, TZ)                   // bar OPEN time in minutes after midnight ET
