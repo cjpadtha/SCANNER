@@ -1,0 +1,325 @@
+//@version=6
+// HVN Breakout Scanner — NQ / MNQ 1m (also works on BTC and other 24h markets)
+// Rules (from Cole):
+//  • HVN zones built from the last 2 hours; zone top/bottom = highest/lowest CLOSE inside the high-volume area
+//  • Breakout: candle 1 closes outside the zone, candle 2 closes even further out → confirmed at candle 2's close
+//  • Big breakout (by candle 2) → trade is taken automatically
+//  • Not big → no trade, just a printed buy/sell probability
+//  • 15m market structure, 1m FVGs and 1m liquidity sweeps raise/lower the probability
+//  • Target = next HVN's midpoint; if there isn't one, 2R
+// Simulation only — places no real orders. Educational, not financial advice.
+//
+// Sizing: 1 contract per trade (set in Properties). Results are tracked in R, so size doesn't change them.
+// Costs: 2 ticks slippage per fill (= 1 NQ point round trip). Add commission in Properties if you want it.
+
+strategy("HVN Breakout Scanner (1m)", shorttitle = "HVN Breakout", overlay = true, process_orders_on_close = true,
+     max_bars_back = 1000, max_labels_count = 500, max_boxes_count = 200,
+     initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1,
+     slippage = 2, commission_type = strategy.commission.cash_per_contract, commission_value = 0.0, pyramiding = 0)
+
+// ───────────────────────── Inputs ─────────────────────────
+grpW      = "Simulation window"
+simHours  = input.int(24, "Simulate the last N hours", minval = 1, maxval = 240, group = grpW)
+sessMode  = input.string("All hours", "Only signal during", options = ["All hours", "NY RTH (09:30-16:00 ET)", "NY AM killzone (09:30-11:00 ET)"], group = grpW)
+
+grpV      = "HVN zones (volume profile)"
+profBars  = input.int(120, "Profile lookback in bars (120 = 2h on 1m)", minval = 20, maxval = 600, group = grpV)
+rows      = input.int(30, "Profile rows", minval = 10, maxval = 100, group = grpV)
+hvnMult   = input.float(1.5, "HVN threshold (x average row volume)", minval = 1.0, step = 0.1, group = grpV)
+showZones = input.bool(true, "Draw current HVN zones", group = grpV)
+
+grpB      = "Breakout & trade"
+bigMult   = input.float(1.0, "Big breakout: candle-2 body ≥ x ATR", minval = 0.1, step = 0.1, group = grpB)
+atrLen    = input.int(14, "ATR length", minval = 1, group = grpB)
+stopMode  = input.string("Candle 1", "Stop placement", options = ["Candle 1", "Zone midpoint", "Zone far edge"], group = grpB)
+fallbackR = input.float(2.0, "Target R when there is no next HVN", minval = 0.5, step = 0.5, group = grpB)
+needTrend = input.bool(false, "Only auto-take big breakouts that agree with 15m structure", group = grpB)
+
+grpT      = "15m market structure"
+htfLen    = input.int(2, "15m swing strength (bars each side)", minval = 1, maxval = 10, group = grpT)
+showTrend = input.bool(true, "Tint background by 15m structure", group = grpT)
+
+grpS      = "Liquidity sweeps (1m)"
+swLen     = input.int(5, "1m swing strength (bars each side)", minval = 1, maxval = 20, group = grpS)
+sweepLook = input.int(30, "Supporting sweep must be within N bars", minval = 1, group = grpS)
+
+grpF      = "Fair value gaps (1m)"
+fvgMinAtr = input.float(0.0, "Minimum FVG size (x ATR)", minval = 0.0, step = 0.05, group = grpF)
+
+grpP      = "Probability weights (heuristic score, not a statistic)"
+wBase     = input.float(50, "Base", group = grpP)
+wTrend    = input.float(15, "15m structure with (+) / against (−)", group = grpP)
+wFvg      = input.float(10, "FVG in breakout direction (+)", group = grpP)
+wSweep    = input.float(10, "Opposite-side sweep before breakout (+)", group = grpP)
+wTrap     = input.float(20, "Breakout candle swept a level and closed back (−)", group = grpP)
+wBig      = input.float(10, "Big breakout candle (+)", group = grpP)
+
+grpA      = "Alerts"
+alertAll  = input.bool(false, "Also alert on probability-only (not taken) signals", group = grpA)
+
+// ───────────────────────── 15m structure ─────────────────────────
+// Bullish after a close above the last confirmed 15m swing high, bearish after a close below the last swing low.
+f_structure(int len) =>
+    float ph = ta.pivothigh(high, len, len)
+    float pl = ta.pivotlow(low, len, len)
+    var float lastH = na
+    var float lastL = na
+    var int trend = 0
+    if not na(ph)
+        lastH := ph
+    if not na(pl)
+        lastL := pl
+    if not na(lastH) and close > lastH
+        trend := 1
+    if not na(lastL) and close < lastL
+        trend := -1
+    trend
+
+// [1] + lookahead_on = value from the last CLOSED 15m candle (no repainting / peeking ahead)
+htfTrend = nz(request.security(syminfo.tickerid, "15", f_structure(htfLen)[1], lookahead = barmerge.lookahead_on))
+
+// ───────────────────────── 1m helpers ─────────────────────────
+atr = ta.atr(atrLen)
+
+// Fair value gaps (3-candle imbalance) on the breakout candles
+bullFvgNow = low > high[2] and (low - high[2]) >= fvgMinAtr * atr
+bearFvgNow = high < low[2] and (low[2] - high) >= fvgMinAtr * atr
+bullFvg    = bullFvgNow or bullFvgNow[1]
+bearFvg    = bearFvgNow or bearFvgNow[1]
+
+// Liquidity sweeps: wick through the last 1m swing, close back inside
+ph1 = ta.pivothigh(high, swLen, swLen)
+pl1 = ta.pivotlow(low, swLen, swLen)
+var float swHigh = na
+var float swLow  = na
+var int bullSweepBar = na   // lows swept  → bullish fuel
+var int bearSweepBar = na   // highs swept → bearish fuel
+
+if not na(swLow)
+    if low < swLow and close > swLow
+        bullSweepBar := bar_index
+        swLow := na
+    else if close < swLow
+        swLow := na
+if not na(swHigh)
+    if high > swHigh and close < swHigh
+        bearSweepBar := bar_index
+        swHigh := na
+    else if close > swHigh
+        swHigh := na
+if not na(ph1)
+    swHigh := ph1
+if not na(pl1)
+    swLow := pl1
+
+// ───────────────────────── HVN zones ─────────────────────────
+// Bins each bar's volume by its close over `n` bars starting `off` bars back.
+// Adjacent high-volume rows merge into one zone; zone top/bottom = highest/lowest close in it.
+f_zones(int off, int n, int nRows, float mult) =>
+    float hi = high[off]
+    float lo = low[off]
+    for i = off to off + n - 1
+        hi := math.max(hi, high[i])
+        lo := math.min(lo, low[i])
+    float step = (hi - lo) / nRows
+    vols = array.new_float(nRows, 0.0)
+    cMax = array.new_float(nRows, na)
+    cMin = array.new_float(nRows, na)
+    tops = array.new_float()
+    bots = array.new_float()
+    if step > 0
+        for i = off to off + n - 1
+            int idx = math.max(0, math.min(nRows - 1, math.floor((close[i] - lo) / step)))
+            array.set(vols, idx, array.get(vols, idx) + nz(volume[i]))
+            float cx = array.get(cMax, idx)
+            array.set(cMax, idx, na(cx) ? close[i] : math.max(cx, close[i]))
+            float cn = array.get(cMin, idx)
+            array.set(cMin, idx, na(cn) ? close[i] : math.min(cn, close[i]))
+        float thr = array.avg(vols) * mult
+        float gTop = na
+        float gBot = na
+        for r = 0 to nRows - 1
+            float v = array.get(vols, r)
+            bool isH = v > 0 and v >= thr
+            if isH
+                gTop := na(gTop) ? array.get(cMax, r) : math.max(gTop, array.get(cMax, r))
+                gBot := na(gBot) ? array.get(cMin, r) : math.min(gBot, array.get(cMin, r))
+            if (not isH or r == nRows - 1) and not na(gTop)
+                array.push(tops, gTop)
+                array.push(bots, gBot)
+                gTop := na
+                gBot := na
+    [tops, bots]
+
+// ───────────────────────── State ─────────────────────────
+inWindow = time >= timenow - simHours * 3600000
+
+string TZ = "America/New_York"
+bool inSess = sessMode == "All hours" ? true :
+     sessMode == "NY RTH (09:30-16:00 ET)" ? not na(time(timeframe.period, "0930-1600", TZ)) :
+     not na(time(timeframe.period, "0930-1100", TZ))
+
+var int   trades    = 0
+var int   wins      = 0
+var int   losses    = 0
+var float netR      = 0.0
+var int   probOnly  = 0
+var int   lastCt    = 0
+var float openRisk  = na
+var float openTgt   = na
+var string openSide = ""
+
+// Record R for each closed trade (uses the Strategy Tester's actual fills)
+int ct = strategy.closedtrades
+if ct > lastCt
+    for j = lastCt to ct - 1
+        float en = strategy.closedtrades.entry_price(j)
+        float ex = strategy.closedtrades.exit_price(j)
+        float d  = strategy.closedtrades.size(j) > 0 ? 1.0 : -1.0
+        float r  = openRisk > 0 ? (ex - en) * d / openRisk : 0.0
+        netR += r
+        trades += 1
+        if r > 0
+            wins += 1
+        else
+            losses += 1
+    lastCt := ct
+
+// ───────────────────────── Scanner ─────────────────────────
+if inWindow and inSess and bar_index > profBars + 5
+    // Profile from the 2h BEFORE candle 1, so the breakout candles don't shape their own zone
+    [tops, bots] = f_zones(2, profBars, rows, hvnMult)
+    int n = array.size(tops)
+    int dir = 0
+    float zT = na
+    float zB = na
+    if n > 0
+        for k = 0 to n - 1
+            float t = array.get(tops, k)
+            float b = array.get(bots, k)
+            if close[2] >= b and close[2] <= t
+                if close[1] > t and close > close[1]
+                    dir := 1
+                    zT := t
+                    zB := b
+                else if close[1] < b and close < close[1]
+                    dir := -1
+                    zT := t
+                    zB := b
+
+    if dir != 0
+        bool big          = dir == 1 ? (close - open) >= bigMult * atr : (open - close) >= bigMult * atr
+        bool trendWith    = htfTrend == dir
+        bool trendAgainst = htfTrend == -dir
+        bool fvgOk        = dir == 1 ? bullFvg : bearFvg
+        bool sweepOk      = dir == 1 ? (not na(bullSweepBar) and bar_index - bullSweepBar <= sweepLook) : (not na(bearSweepBar) and bar_index - bearSweepBar <= sweepLook)
+        bool trap         = dir == 1 ? (not na(bearSweepBar) and bar_index - bearSweepBar <= 1) : (not na(bullSweepBar) and bar_index - bullSweepBar <= 1)
+
+        float p = wBase
+        p += trendWith ? wTrend : trendAgainst ? -wTrend : 0.0
+        p += fvgOk ? wFvg : 0.0
+        p += sweepOk ? wSweep : 0.0
+        p -= trap ? wTrap : 0.0
+        p += big ? wBig : 0.0
+        p := math.max(5.0, math.min(95.0, p))
+
+        // Stop
+        float stp = stopMode == "Candle 1" ? (dir == 1 ? low[1] : high[1]) : stopMode == "Zone midpoint" ? (zT + zB) / 2 : (dir == 1 ? zB : zT)
+        float risk = math.abs(close - stp)
+        bool stopOk = dir == 1 ? stp < close : stp > close
+
+        // Target: nearest next HVN midpoint in the trade direction, else fallback R
+        float tgt = na
+        for k = 0 to n - 1
+            float m = (array.get(tops, k) + array.get(bots, k)) / 2
+            if dir == 1 and array.get(bots, k) > zT and m > close
+                if na(tgt) or m < tgt
+                    tgt := m
+            if dir == -1 and array.get(tops, k) < zB and m < close
+                if na(tgt) or m > tgt
+                    tgt := m
+        string tgtSrc = na(tgt) ? str.tostring(fallbackR) + "R fallback" : "next HVN mid"
+        if na(tgt)
+            tgt := close + dir * fallbackR * risk
+        float plannedR = risk > 0 ? math.abs(tgt - close) / risk : na
+
+        bool flat  = strategy.position_size == 0
+        bool take  = big and risk > 0 and stopOk and flat and (not needTrend or trendWith)
+        string why = not big ? "not a big breakout" : not flat ? "already in a trade" : (risk <= 0 or not stopOk) ? "invalid stop" : (needTrend and not trendWith) ? "against 15m structure" : ""
+
+        if take
+            openRisk := risk
+            openTgt  := tgt
+            if dir == 1
+                openSide := "LONG"
+                strategy.entry("L", strategy.long)
+                strategy.exit("LX", "L", stop = stp, limit = tgt)
+            else
+                openSide := "SHORT"
+                strategy.entry("S", strategy.short)
+                strategy.exit("SX", "S", stop = stp, limit = tgt)
+        else
+            probOnly += 1
+
+        string head = take ? (dir == 1 ? "LONG " : "SHORT ") : (dir == 1 ? "BUY? " : "SELL? ")
+        string tip = "HVN zone: " + str.tostring(zB, format.mintick) + " – " + str.tostring(zT, format.mintick) +
+             "\n15m structure: " + (trendWith ? "WITH" : trendAgainst ? "AGAINST" : "neutral") +
+             "\nFVG: " + (fvgOk ? "yes" : "no") +
+             "\nSupporting sweep: " + (sweepOk ? "yes" : "no") +
+             "\nTrap sweep on breakout: " + (trap ? "YES" : "no") +
+             "\nBig candle 2: " + (big ? "yes" : "no") +
+             "\nEntry: " + str.tostring(close, format.mintick) +
+             "\nStop: " + str.tostring(stp, format.mintick) +
+             "\nTarget: " + str.tostring(tgt, format.mintick) + " (" + tgtSrc + ", " + str.tostring(plannedR, "#.##") + "R)" +
+             (take ? "" : "\nNot taken: " + why)
+        color c = take ? (dir == 1 ? color.new(color.green, 0) : color.new(color.red, 0)) : color.new(color.gray, 10)
+        label.new(bar_index, dir == 1 ? low : high, head + str.tostring(p, "#") + "%",
+             style = dir == 1 ? label.style_label_up : label.style_label_down,
+             color = c, textcolor = color.white, size = size.small, tooltip = tip)
+
+        // Phone / app alert: create an alert on this strategy with "alert() function calls only"
+        if take or alertAll
+            alert(syminfo.ticker + " " + head + str.tostring(p, "#") + "% | entry " + str.tostring(close, format.mintick) +
+                 " stop " + str.tostring(stp, format.mintick) + " target " + str.tostring(tgt, format.mintick) +
+                 " (" + str.tostring(plannedR, "#.##") + "R)" + (take ? "" : " | not taken: " + why), alert.freq_once_per_bar_close)
+
+// Show target line for the open trade
+plot(strategy.position_size != 0 ? openTgt : na, "Open target", color = color.new(color.aqua, 0), style = plot.style_linebr)
+
+// ───────────────────────── Visuals ─────────────────────────
+bgcolor(showTrend and inWindow ? (htfTrend == 1 ? color.new(color.green, 94) : htfTrend == -1 ? color.new(color.red, 94) : na) : na, title = "15m structure")
+bgcolor(inWindow and not inWindow[1] ? color.new(color.yellow, 60) : na, title = "Window start")
+
+var array<box> zoneBoxes = array.new<box>()
+if barstate.islast and showZones
+    for bx in zoneBoxes
+        box.delete(bx)
+    array.clear(zoneBoxes)
+    [lt, lb] = f_zones(0, profBars, rows, hvnMult)
+    int zn = array.size(lt)
+    if zn > 0
+        for k = 0 to zn - 1
+            array.push(zoneBoxes, box.new(bar_index - profBars, array.get(lt, k), bar_index + 10, array.get(lb, k),
+                 border_color = color.new(color.orange, 30), bgcolor = color.new(color.orange, 85)))
+
+var table tb = table.new(position.top_right, 2, 9, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    color w = color.white
+    table.cell(tb, 0, 0, "HVN Breakout Scanner", text_color = w)
+    table.cell(tb, 1, 0, timeframe.period == "1" ? "1m ✓" : "⚠ switch chart to 1m", text_color = timeframe.period == "1" ? color.lime : color.orange)
+    table.cell(tb, 0, 1, "Window", text_color = w)
+    table.cell(tb, 1, 1, "last " + str.tostring(simHours) + "h" + (sessMode == "All hours" ? "" : ", NY session only"), text_color = w)
+    table.cell(tb, 0, 2, "Trades taken", text_color = w)
+    table.cell(tb, 1, 2, str.tostring(trades), text_color = w)
+    table.cell(tb, 0, 3, "Wins / Losses", text_color = w)
+    table.cell(tb, 1, 3, str.tostring(wins) + " / " + str.tostring(losses), text_color = w)
+    table.cell(tb, 0, 4, "Win rate", text_color = w)
+    table.cell(tb, 1, 4, trades > 0 ? str.tostring(100.0 * wins / trades, "#.#") + "%" : "–", text_color = w)
+    table.cell(tb, 0, 5, "TOTAL R", text_color = w)
+    table.cell(tb, 1, 5, (netR >= 0 ? "+" : "") + str.tostring(netR, "#.##") + "R", text_color = netR >= 0 ? color.lime : color.red)
+    table.cell(tb, 0, 6, "Avg R / trade", text_color = w)
+    table.cell(tb, 1, 6, trades > 0 ? str.tostring(netR / trades, "#.##") + "R" : "–", text_color = w)
+    table.cell(tb, 0, 7, "Probability-only signals", text_color = w)
+    table.cell(tb, 1, 7, str.tostring(probOnly), text_color = w)
+    table.cell(tb, 0, 8, "Open trade", text_color = w)
+    table.cell(tb, 1, 8, strategy.position_size != 0 ? openSide + " (not counted)" : "none", text_color = w)

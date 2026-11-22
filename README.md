@@ -1,43 +1,56 @@
-# SCANNER — NQ Confluence Scanner
+# SCANNER — HVN Breakout Scanner
 
-Educational study tool for Nasdaq-100 futures (NQ / MNQ). It does **not** place trades and is not financial advice.
+Educational study tool for NQ / MNQ futures on the 1-minute chart (also works on BTC). It runs inside TradingView, simulates trades in the Strategy Tester, and **never places real orders**. Not financial advice.
 
-It scores five things and calls a bias when the total reaches +3 or -3:
+## The rules
 
-| Factor | +1 (bullish) | -1 (bearish) |
-|---|---|---|
-| POC (5-day volume profile) | price above POC | price below POC |
-| Liquidity sweep (last 30 min) | swept previous day low, closed back above | swept previous day high, closed back below |
-| Unfilled fair value gaps | more bullish FVGs below price | more bearish FVGs above price |
-| Engulfing candle | bullish engulfing | bearish engulfing |
-| Opening range (09:30–10:00 ET) | above the high | below the low |
+1. **HVN zones** are built from the 2 hours *before* the breakout. High-volume rows of the profile merge into zones; a zone's top/bottom is the highest/lowest **close** inside it.
+2. **Breakout:** candle 1 closes outside the zone, candle 2 closes even further out. Confirmed at candle 2's close.
+3. **Big breakout** (candle 2's body ≥ 1× ATR) → the trade is taken automatically.
+4. **Not big** → no trade, just a grey BUY?/SELL? label with a probability.
+5. The probability starts at 50% and moves with:
 
-The Python scanner also scores headline sentiment; TradingView can't read news, so the Pine version doesn't.
+   | Factor | Change |
+   |---|---|
+   | 15m market structure with / against the breakout | +15 / −15 |
+   | 1m fair value gap in the breakout direction | +10 |
+   | Opposite-side 1m liquidity sweep in the last 30 bars | +10 |
+   | Breakout candle swept a level and closed back (trap) | −20 |
+   | Big breakout candle | +10 |
 
-## TradingView (recommended — live data, phone alerts)
+   It's a heuristic score, not a measured probability. The backtest is how you find out if it means anything.
+6. **Stop:** candle 1's low/high (or zone midpoint / far edge, in settings).
+7. **Target:** midpoint of the next HVN in the trade direction; if there isn't one, 2R.
 
-Files in `pine/`:
+## Set it up (TradingView)
 
-- `nq_confluence_indicator.pine` — draws POC, PDH/PDL, opening range, unfilled FVG boxes, nearest HVNs, L/S signal arrows and a score table. Has alerts.
-- `nq_confluence_strategy.pine` — same scoring as a strategy, for TradingView's **Strategy Tester** (the backtest).
+Script: [`pine/hvn_breakout_scanner.pine`](pine/hvn_breakout_scanner.pine)
 
-**Add a script** (needs a computer, at tradingview.com — once added, it also shows in the phone app):
+1. On a computer at tradingview.com, open `MNQ1!` or `NQ1!` on the **1-minute** chart.
+2. **Pine Editor** (bottom) → delete the template → paste the script → **Save** → **Add to chart**.
+3. Open **Strategy Tester** for the results. The table on the chart shows trades, win rate and total R for the window.
 
-1. Open a chart of `MNQ1!` or `NQ1!` on the **5-minute** timeframe.
-2. Open **Pine Editor** at the bottom, delete the template, paste the contents of a `.pine` file.
-3. Click **Save**, then **Add to chart**.
+Once added, it shows in the phone app too.
 
-**Phone alerts:** on the chart with the indicator added, click **Alert** → Condition: **NQ Confluence** → pick *NQ confluence LONG*, *SHORT* or *ANY signal* → "Once per bar close" → turn on **Notify in app**. Alerts fire on TradingView's servers, so you get them on your phone even with the app closed.
+**Settings worth knowing** (gear icon):
 
-**Backtest:** add the strategy script, then open **Strategy Tester** at the bottom. Look at Net profit, Percent profitable, Profit factor and the List of trades. By default it enters when the score first reaches ±3, exits after 12 bars (60 min) or at 15:55 ET, and charges 1 point round trip in slippage. Change those in the script's settings (gear icon) and **Properties** tab.
+- *Simulate the last N hours* — default 24. NQ is closed on weekends, so raise it (e.g. 120) to get enough trades. Free plans load fewer 1m bars.
+- *Only signal during* — all hours, NY regular hours, or the 09:30–11:00 killzone.
+- *Only auto-take breakouts that agree with 15m structure* — off by default.
+- Sizing is 1 contract; slippage is 2 ticks per fill (1 NQ point round trip). Change in **Properties**.
 
-**Reading the results**
+**Phone alerts:** Alert (clock icon) → Condition: **HVN Breakout** → **alert() function calls only** → turn on **Notify in app**. You'll get the side, probability, entry, stop and target for every trade taken. Turn on *Also alert on probability-only signals* in settings to get the grey ones too.
 
-- Percent profitable near 50% with a small average trade ≈ no edge.
-- Turn off longs or shorts in settings to see if one side carries everything — often that's just the trend of the period.
-- Free plans load fewer bars, so the test covers a shorter history. A few hundred trades is still a small sample.
+## Reading the results
 
-## Python (optional)
+- Judge it in **R**, not dollars: avg R per trade above 0 after costs is the bar to clear.
+- A handful of trades over a day or two is noise. Look at 50+ trades before trusting it.
+- Try the 15m-structure filter on and off, and the session filter, and compare total R.
+
+## Python (older confluence model)
+
+`nq_scanner.py` and `backtest.py` are the earlier POC / sweep / FVG / opening-range confluence score using Yahoo data. They don't implement the HVN breakout rules above.
+
 
 ```
 pip install -r requirements.txt
