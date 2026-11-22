@@ -291,13 +291,13 @@ if array.size(pDir) > 0
             int   sd = array.get(pDir, k)
             float se = array.get(pEntry, k)
             float ss = array.get(pStop, k)
-            float st = array.get(pTgt, k)
+            float sTg = array.get(pTgt, k)
             float rk = math.abs(se - ss)
             bool hitSl   = sd == 1 ? low <= ss : high >= ss
-            bool hitTp   = sd == 1 ? high >= st : low <= st
+            bool hitTp   = sd == 1 ? high >= sTg : low <= sTg
             bool expired = bar_index - array.get(pBar, k) >= maxHold
             if hitSl or hitTp or expired
-                float gross = hitSl ? -1.0 : hitTp ? math.abs(st - se) / rk : (close - se) * sd / rk
+                float gross = hitSl ? -1.0 : hitTp ? math.abs(sTg - se) / rk : (close - se) * sd / rk
                 float net   = gross - 2.0 * feePct / 100.0 * se / rk
                 float win   = net > 0 ? 1.0 : 0.0
                 aN += 1.0
@@ -557,7 +557,7 @@ var table tb = table.new(tblPos, 2, 6, bgcolor = color.new(color.black, 30), bor
 if barstate.islast and tblPosIn != "Hidden"
     color w  = color.new(color.white, 10)
     color dm = color.new(color.gray, 0)
-    size  ts = size.small
+    ts = size.small
     bool  ok = timeframe.period == "1"
     table.cell(tb, 0, 0, "HVN Breakout · " + str.tostring(simHours) + "h", text_color = w, text_size = ts, text_halign = text.align_left)
     table.cell(tb, 1, 0, ok ? "1m" : "switch to 1m", text_color = ok ? dm : color.orange, text_size = ts)
