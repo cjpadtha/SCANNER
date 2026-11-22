@@ -5,10 +5,9 @@ Educational analysis tool. It does NOT place trades and is not financial advice.
 
 What it checks:
   1. Volume profile  -> POC and High Volume Nodes (HVNs)
-  2. Absorption      -> high-volume, small-range bars (proxy; real absorption needs bid/ask footprint data)
-  3. ICT concepts    -> previous day high/low, liquidity sweeps, unfilled fair value gaps, killzones
-  4. Patterns        -> engulfing, inside bar, opening range breakout
-  5. News            -> recent headlines with simple keyword sentiment
+  2. ICT concepts    -> previous day high/low, liquidity sweeps, unfilled fair value gaps, killzones
+  3. Patterns        -> engulfing, inside bar, opening range breakout
+  4. News            -> recent headlines with simple keyword sentiment
 
 Setup:   pip install -r requirements.txt
 Run:     python nq_scanner.py
@@ -69,24 +68,7 @@ def volume_profile(df):
     return poc, hvns
 
 
-# ---------------- 2. Absorption (proxy) ----------------
-
-def absorption(df, lookback=20):
-    vol_avg = df["Volume"].rolling(lookback).mean()
-    rng = df["High"] - df["Low"]
-    rng_avg = rng.rolling(lookback).mean()
-    hits = df[(df["Volume"] > 2 * vol_avg) & (rng < 0.6 * rng_avg)]
-    out = []
-    for ts, r in hits.iterrows():
-        mid = (r["High"] + r["Low"]) / 2
-        if r["Close"] >= mid:
-            out.append((ts, float(r["Low"]), "bullish", "selling absorbed near low"))
-        else:
-            out.append((ts, float(r["High"]), "bearish", "buying absorbed near high"))
-    return out
-
-
-# ---------------- 3. ICT concepts ----------------
+# ---------------- 2. ICT concepts ----------------
 
 def key_levels(df):
     sess = session_dates(df.index)
@@ -140,7 +122,7 @@ def in_killzone(ts):
     return None
 
 
-# ---------------- 4. Patterns ----------------
+# ---------------- 3. Patterns ----------------
 
 def candle_patterns(df):
     a, b = df.iloc[-2], df.iloc[-1]
@@ -154,7 +136,7 @@ def candle_patterns(df):
     return found
 
 
-# ---------------- 5. News ----------------
+# ---------------- 4. News ----------------
 
 def get_news():
     headlines = []
@@ -185,7 +167,6 @@ def score_window(df, news=None):
     """
     price = float(df["Close"].iloc[-1])
     poc, hvns = volume_profile(df)
-    absorb = absorption(df)
     lv, today = key_levels(df)
     sweeps = liquidity_sweeps(today, lv)
     fvgs = fair_value_gaps(df)
@@ -198,11 +179,6 @@ def score_window(df, news=None):
         factors.append((key, points, why))
 
     add("poc", 1 if price > poc else -1, f"price {'above' if price > poc else 'below'} POC {poc:.2f}")
-
-    recent_abs = [a for a in absorb if a[0] >= df.index[-6]] if len(df) >= 6 else []
-    if recent_abs:
-        a = recent_abs[-1]
-        add("absorption", 1 if a[2] == "bullish" else -1, f"absorption at {a[1]:.2f} ({a[3]})")
 
     if sweeps:
         s = sweeps[-1]
