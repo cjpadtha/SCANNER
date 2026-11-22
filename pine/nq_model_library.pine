@@ -15,7 +15,7 @@
 // ★ MAIN (Cole's main model) = up to 2 trades a day, one position at a time:
 //   ① ORB15 whenever the daily trend AND the 15-minute structure agree with the breakout, plus
 //   ② the first signal of the day (ORB15 / HVN / SWEEP / ORB30 / IMOM) in the daily trend's direction, if it's a different trade.
-//   Stop for the day after an ORB15 win. Risk per trade in $ (input); contracts = risk ÷ (stop points × point value), min 1.
+//   Longs only when the daily trend AND the 15-minute structure agree. Stop for the day after an ORB15 win. Risk per trade in $ (input); contracts = risk ÷ (stop points × point value), min 1.
 // "First trade of the day" = the first ORB15 / HVN / SWEEP / ORB30 / IMOM signal that passes the filter; one trade per day.
 // The vault version also uses value-area candidates (they lost money inside MAIN) and doesn't force 15:55 exits on HVN trades — small differences.
 
@@ -327,6 +327,12 @@ else if firstLike and sigIMOM != 0 and f_pass(mFilt, sigIMOM)
     stp := stIMOM
     tgt := na
     why := "IMOM"
+
+// ★ MAIN stricter longs (2026-11-22): a long is taken only when the daily trend AND the 15-min structure agree.
+// If the day's first daily-trend signal is a long without 15-min agreement, it's skipped and no other "first trade" is taken that day.
+if mSetup == "MAIN" and d == 1 and not f_pass("both", 1) and not mainA
+    tradedToday := true
+    d := 0
 
 // position drawing state (green = target, red = stop, white = entry; result label at the exit)
 var box   pTp = na
