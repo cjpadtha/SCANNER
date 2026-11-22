@@ -1,5 +1,5 @@
 //@version=6
-// HVN Breakout Scanner — NASDAQ futures (MNQ / NQ) 5m · NY AM session · fixed target (6h HVN zones)
+// HVN Breakout Scanner — NASDAQ futures (MNQ / NQ) 5m · RETEST entries · NY session 09:30-16:00 · fixed target (6h HVN zones)
 // Rules (from Cole):
 //  • HVN zones built from the last 6 hours (72 bars on 5m); zone top/bottom = highest/lowest CLOSE inside the high-volume area
 //  • Breakout: candle 1 closes outside the zone, candle 2 closes even further out → confirmed at candle 2's close
@@ -10,8 +10,9 @@
 // Simulation only — places no real orders. Educational, not financial advice.
 //
 // Use CME_MINI:MNQ1! (Micro Nasdaq, $2 per point) or CME_MINI:NQ1! ($20 per point) on the 5-minute chart.
-// Settings from the vault's NQ test (Research/2026-11-22 NQ test (Topstep)): NY AM killzone 09:30-11:00 ET,
-// fixed exit (target = next HVN midpoint, else 2R), 6h zones, no trap sweeps, weekdays.
+// Settings from the vault's MNQ lab (Research/2026-11-22 MNQ retest model): breakout of a 6h HVN zone (09:30-16:00 ET), then WAIT for
+// price to retest the broken edge and close back in the breakout direction → enter at that close; stop beyond the zone's far edge;
+// fixed target = next HVN midpoint (else 2R). No trap sweeps, weekdays. Old breakout-close entry still available (Entry input).
 // The expected-value filter below was trained on BITCOIN — it is off here and should stay off for Nasdaq.
 // Sizing: 2 contracts. Costs: $0.50 per contract per side (≈ Topstep MNQ round trip ~$1) + 1 tick slippage.
 // Topstep $50K Combine: $3,000 target, $2,000 max loss (end-of-day trailing), best day < 50% of profit.
@@ -25,7 +26,7 @@ strategy("HVN Breakout Scanner (NQ 5m)", shorttitle = "HVN Breakout NQ", overlay
 // ───────────────────────── Inputs ─────────────────────────
 grpW      = "Simulation window"
 simHours  = input.int(720, "Simulate the last N hours (168 = 1 week, 672 = 4 weeks)", minval = 1, maxval = 720, group = grpW)
-sessMode  = input.string("NY AM killzone (09:30-11:00 ET)", "Only signal during", options = ["All hours", "London (03:00-09:00 ET)", "NY RTH (09:30-16:00 ET)", "NY AM killzone (09:30-11:00 ET)"], group = grpW)
+sessMode  = input.string("NY RTH (09:30-16:00 ET)", "Only signal during", options = ["All hours", "London (03:00-09:00 ET)", "NY RTH (09:30-16:00 ET)", "NY AM killzone (09:30-11:00 ET)"], group = grpW)
 
 grpV      = "HVN zones (volume profile)"
 profBars  = input.int(72, "Profile lookback in bars (72 = 6h on the 5m chart)", minval = 20, maxval = 600, group = grpV)
@@ -39,6 +40,11 @@ atrLen    = input.int(14, "ATR length", minval = 1, group = grpB)
 stopMode  = input.string("Candle 1", "Stop placement", options = ["Candle 1", "Zone midpoint", "Zone far edge"], group = grpB)
 fallbackR = input.float(2.0, "Target R when there is no next HVN", minval = 0.5, step = 0.5, group = grpB)
 needTrend = input.bool(false, "Only auto-take big breakouts that agree with 15m structure", group = grpB)
+entryMode = input.string("Retest confirm", "Entry", options = ["Retest confirm", "Breakout close"], group = grpB,
+     tooltip = "Retest confirm: after a breakout, wait for price to come back to the broken zone edge and close back in the breakout direction; enter at that close, stop beyond the zone. Breakout close: the old entry at candle 2's close.")
+needBig   = input.bool(false, "Require the big breakout candle", group = grpB)
+retestBars = input.int(12, "Retest must happen within N bars", minval = 1, group = grpB)
+retestBuf = input.float(0.1, "Retest stop: beyond the zone's far edge by x ATR", minval = 0, step = 0.05, group = grpB)
 noTrap    = input.bool(true, "Skip trap-sweep breakouts (candle swept a level and closed back)", group = grpB)
 noWeekend = input.bool(true, "No trades on Saturday / Sunday (ET)", group = grpB)
 useEv     = input.bool(false, "Top-20% expected-value filter (trained on BITCOIN — keep OFF for Nasdaq)", group = grpB)
@@ -451,6 +457,58 @@ if array.size(pDir) > 0
                 array.remove(pSess, k)
 
 // ───────────────────────── Scanner ─────────────────────────
+// ───────────────────────── Retest entries (mirrors the Python research's retest_step) ─────────────────────────
+var int   rtBar  = na
+var int   rtDir  = 0
+var float rtLvl  = na
+var float rtStop = na
+var float rtTgt  = na
+if not na(rtBar) and bar_index > rtBar and strategy.position_size == 0
+    bool rtExpired = bar_index - rtBar > retestBars
+    bool rtRanAway = rtDir == 1 ? (high >= rtTgt and low > rtLvl) : (low <= rtTgt and high < rtLvl)
+    if rtExpired or rtRanAway
+        rtBar := na
+    else if (rtDir == 1 ? low <= rtLvl : high >= rtLvl)
+        bool rtHeld = rtDir == 1 ? close > rtLvl : close < rtLvl
+        if rtHeld
+            float rk = math.abs(close - rtStop)
+            float tg = (rtTgt - close) * rtDir > 0 ? rtTgt : close + rtDir * fallbackR * rk
+            openRisk := rk
+            openTgt  := tg
+            xEntry := close
+            xRisk := rk
+            xBest := close
+            xStop := rtStop
+            xTgt := tg
+            xDir := rtDir
+            xBar := bar_index
+            xQty := na
+            xPartial := false
+            string rid = rtDir == 1 ? "L" : "S"
+            openSide := rtDir == 1 ? "LONG" : "SHORT"
+            strategy.entry(rid, rtDir == 1 ? strategy.long : strategy.short)
+            if exitMode == "Fixed"
+                strategy.exit(rid + "X", rid, stop = rtStop, limit = tg)
+            else if exitMode == "Trail"
+                strategy.exit(rid + "X", rid, stop = rtStop)
+            else
+                strategy.exit(rid + "X1", rid, qty_percent = 50, stop = rtStop, limit = tg)
+                strategy.exit(rid + "X2", rid, stop = rtStop)
+            label.new(bar_index, rtDir == 1 ? low : high,
+                 (rtDir == 1 ? "BUY (retest) " : "SELL (retest) ") + str.tostring(math.abs(tg - close) / rk, "#.#") + "R @ " + str.tostring(close, format.mintick),
+                 style = rtDir == 1 ? label.style_label_up : label.style_label_down,
+                 color = rtDir == 1 ? color.new(color.teal, 0) : color.new(color.red, 0), textcolor = color.white, size = size.small,
+                 tooltip = "Entry " + str.tostring(close, format.mintick) + "\nStop " + str.tostring(rtStop, format.mintick) + "\nTarget " + str.tostring(tg, format.mintick))
+            if showBoxes
+                tpBox := box.new(bar_index, math.max(close, tg), bar_index + 1, math.min(close, tg),
+                     border_color = color.new(color.green, 50), bgcolor = color.new(color.green, 82))
+                slBox := box.new(bar_index, math.max(close, rtStop), bar_index + 1, math.min(close, rtStop),
+                     border_color = color.new(color.red, 50), bgcolor = color.new(color.red, 82))
+                entryLine := line.new(bar_index, close, bar_index + 1, close, color = color.new(color.white, 30), width = 1)
+            rtBar := na
+        else if (rtDir == 1 and close < rtStop) or (rtDir == -1 and close > rtStop)
+            rtBar := na                                          // closed back through the stop level: breakout failed
+
 if inWindow and inSess and bar_index > profBars + 5
     // Profile from the bars BEFORE candle 1, so the breakout candles don't shape their own zone
     [tops, bots, zvols] = f_zones(2, profBars, rows, hvnMult)
@@ -558,7 +616,7 @@ if inWindow and inSess and bar_index > profBars + 5
         bool  evOk = not useEv or evv >= EV_CUT
 
         bool flat  = strategy.position_size == 0
-        bool take  = big and risk > 0 and stopOk and flat and (not needTrend or trendWith) and probOk and distOk and edgeOk and not (noTrap and trap) and evOk
+        bool take  = (big or not needBig) and risk > 0 and stopOk and flat and na(rtBar) and (not needTrend or trendWith) and probOk and distOk and edgeOk and not (noTrap and trap) and evOk
         string why = not big ? "not a big breakout" : not flat ? "already in a trade" : (risk <= 0 or not stopOk) ? "invalid stop" :
              (needTrend and not trendWith) ? "against 15m structure" : not probOk ? "score below minimum" :
              not distOk ? "target only " + str.tostring(tgtPct, "#.##") + "% away" :
@@ -588,7 +646,13 @@ if inWindow and inSess and bar_index > profBars + 5
                 array.shift(pBucket)
                 array.shift(pSess)
 
-        if take
+        if take and entryMode == "Retest confirm"
+            rtBar  := bar_index                              // wait for the retest instead of entering now
+            rtDir  := dir
+            rtLvl  := dir == 1 ? zT : zB
+            rtStop := (dir == 1 ? zB : zT) - dir * retestBuf * atr
+            rtTgt  := tgt
+        else if take
             openRisk := risk
             openTgt  := tgt
             xEntry := close
@@ -633,7 +697,10 @@ if inWindow and inSess and bar_index > profBars + 5
              "\nTarget: " + str.tostring(tgt, format.mintick) + " (" + tgtSrc + ", " + str.tostring(plannedR, "#.##") + "R, " + str.tostring(tgtPct, "#.##") + "% away)" +
              (take ? "" : "\nNot taken: " + why)
         string rr = str.tostring(plannedR, "#.#") + "R"
-        if take
+        if take and entryMode == "Retest confirm"
+            label.new(bar_index, dir == 1 ? low : high, (dir == 1 ? "breakout ↑ wait retest " : "breakout ↓ wait retest ") + str.tostring(dir == 1 ? zT : zB, format.mintick),
+                 style = dir == 1 ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 20), textcolor = color.white, size = size.tiny, tooltip = tip)
+        else if take
             // Trade taken: one label with side, probability, R:R and entry, plus target/stop boxes
             label.new(bar_index, dir == 1 ? low : high,
                  (dir == 1 ? "BUY " : "SELL ") + rr + " @ " + str.tostring(close, format.mintick) +
