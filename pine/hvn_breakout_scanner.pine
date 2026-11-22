@@ -1,7 +1,7 @@
 //@version=6
 // HVN Breakout Scanner — BTC 5m (6h HVN zones, trailing exit)
 // Rules (from Cole):
-//  • HVN zones built from the last 2 hours; zone top/bottom = highest/lowest CLOSE inside the high-volume area
+//  • HVN zones built from the last 6 hours (72 bars on 5m); zone top/bottom = highest/lowest CLOSE inside the high-volume area
 //  • Breakout: candle 1 closes outside the zone, candle 2 closes even further out → confirmed at candle 2's close
 //  • Big breakout (by candle 2) → trade is taken automatically
 //  • Not big → no trade, just a printed buy/sell probability
@@ -148,7 +148,7 @@ string EV_MODEL_DATE = "2026-11-22"
 float  EV_CUT  = 0.495434
 float  VOL_LO  = 0.107673
 float  VOL_HI  = 0.144160
-f_ev(bool tw, bool tag, bool fvg, bool sw, bool trp, bool bg, bool vh, bool vw, bool ex, bool t1, bool t4, bool m24, int hr, bool wk, int d, float atrPct, float tgtPct, float pR, float bodyAtr, float zoneW, float dR, bool cdv, bool absb) =>
+f_ev(bool tw, bool tag, bool fvg, bool sw, bool trp, bool bg, bool vh, bool vw, bool ex, bool t1, bool t4, bool m24, int hr, bool wk, int d, float atrPct, float tgtPct, float pR, float bodyAtr, float zoneW, float dR, bool cdv, bool absb, float zD, float eAb) =>
     float e = 0.236341
     e += -0.048387 * ((tw ? 1.0 : 0.0) - 0.519108) / 0.499635   // trendWith
     e += 0.048387 * ((tag ? 1.0 : 0.0) - 0.480892) / 0.499635   // trendAgainst
@@ -172,6 +172,8 @@ f_ev(bool tw, bool tag, bool fvg, bool sw, bool trp, bool bg, bool vh, bool vw, 
     e += -0.064493 * (math.max(-1.0, math.min(1.0, dR)) - 0.381016) / 0.289865   // delta_ratio_c
     e += -0.050183 * ((cdv ? 1.0 : 0.0) - 0.187898) / 0.390631   // cvd_div
     e += -0.017390 * ((absb ? 1.0 : 0.0) - 0.194268) / 0.395636   // absorbed
+    e += -0.047480 * (math.max(-1.0, math.min(1.0, zD)) + 0.002555) / 0.307970   // zone_delta_c
+    e += 0.098828 * (math.max(0.0, math.min(5.0, eAb)) - 0.669586) / 0.845501   // edge_absorb_c
     e += 0.013049 * ((hr == 3 ? 1.0 : 0.0) - 0.186306) / 0.389353   // h3
     e += 0.096837 * ((hr == 4 ? 1.0 : 0.0) - 0.195860) / 0.396861   // h4
     e += 0.001177 * ((hr == 5 ? 1.0 : 0.0) - 0.159236) / 0.365896   // h5
@@ -179,7 +181,7 @@ f_ev(bool tw, bool tag, bool fvg, bool sw, bool trp, bool bg, bool vh, bool vw, 
     e += -0.074562 * ((hr == 7 ? 1.0 : 0.0) - 0.140127) / 0.347119   // h7
     e += -0.037036 * ((hr == 8 ? 1.0 : 0.0) - 0.171178) / 0.376665   // h8
     e
-// not available in TradingView (set to their average): zone_delta_c, edge_absorb_c, big_ratio_c, intensity_c
+// not available in TradingView (set to their average): big_ratio_c, intensity_c
 // EV-MODEL>>
 
 // Fair value gaps (3-candle imbalance) on the breakout candles
@@ -447,7 +449,7 @@ if array.size(pDir) > 0
 
 // ───────────────────────── Scanner ─────────────────────────
 if inWindow and inSess and bar_index > profBars + 5
-    // Profile from the 2h BEFORE candle 1, so the breakout candles don't shape their own zone
+    // Profile from the bars BEFORE candle 1, so the breakout candles don't shape their own zone
     [tops, bots, zvols] = f_zones(2, profBars, rows, hvnMult)
     int n = array.size(tops)
     int dir = 0
@@ -531,10 +533,25 @@ if inWindow and inSess and bar_index > profBars + 5
         float dRatio = (volume + volume[1]) > 0 ? (ofDelta + ofDelta[1]) / (volume + volume[1]) * dir : 0.0
         bool  cvdDiv = dir == 1 ? (close > hiC30 and not (ofCvd > hiCvd30)) : (close < loC30 and not (ofCvd < loCvd30))
         bool  absorbed = ofDelta * dir < 0
+        // Who built the zone: net buy/sell flow of the profile bars that closed inside it (same as the research)
+        float zdV = 0.0
+        float zdD = 0.0
+        for j = 2 to profBars + 1
+            if close[j] >= zB and close[j] <= zT
+                zdV += nz(volume[j])
+                zdD += nz(ofDelta[j])
+        float zoneDelta = zdV > 0 ? zdD / zdV * dir : 0.0
+        // Absorption at the zone edge before the breakout: aggression against us near the edge, candle still held our way
+        float edgeLvl = dir == 1 ? zT : zB
+        float edgeAbs = 0.0
+        for j = 2 to 11
+            bool near = dir == 1 ? high[j] >= edgeLvl - 0.25 * atr : low[j] <= edgeLvl + 0.25 * atr
+            if near and ofDelta[j] * dir < 0 and (close[j] - open[j]) * dir >= 0
+                edgeAbs += 1.0
         float evv  = f_ev(trendWith, trendAgainst, fvgOk, sweepOk, trap, big, volHigh, vwapWith, extended,
              math.sign(close - ema1h) == dir, math.sign(close - ema4h) == dir, math.sign(close / close24 - 1) == dir,
              etHr, isWeekend, dir, atr / close * 100, tgtPct, plannedR, math.abs(close - open) / atr, (zT - zB) / close * 100,
-             dRatio, cvdDiv, absorbed)
+             dRatio, cvdDiv, absorbed, zoneDelta, edgeAbs)
         bool  evOk = not useEv or evv >= EV_CUT
 
         bool flat  = strategy.position_size == 0
@@ -656,8 +673,8 @@ bgcolor(inWindow and not inWindow[1] ? color.new(color.yellow, 60) : na, title =
 
 bool atLastBar = barstate.islastconfirmedhistory or barstate.isrealtime   // newest closed bar (no calc_on_every_tick warning)
 
-// Current HVN zones (last 2h): green = support below price, red = resistance above, orange = price inside.
-// Dotted line = zone midpoint (the trade target). Label = price range and share of the 2h volume.
+// Current HVN zones (profile lookback): green = support below price, red = resistance above, orange = price inside.
+// Dotted line = zone midpoint (the trade target). Label = price range and share of the lookback volume.
 var array<box>   zoneBoxes = array.new<box>()
 var array<line>  zoneMids  = array.new<line>()
 var array<label> zoneLbls  = array.new<label>()
