@@ -1,0 +1,310 @@
+//@version=6
+// NQ Model Library — the 10 ranked Nasdaq models from the vault (Models/Model comparison) in one strategy.
+// Pick a model in the inputs; the strategy trades only that model, and the table shows how all 10 compare.
+// Chart: CME_MINI:MNQ1! (or NQ1!) on the 5-minute chart. Times are New York (ET). Flat by 15:55.
+// Simulation only — places no real orders. Educational, not financial advice.
+//
+// Setups
+//  ORB15  09:30-09:45 range; first 5m close beyond it before 11:30 → enter; stop = other side; target 2R
+//  ORB30  09:30-10:00 range; first 5m close beyond it before 11:30 → enter; stop = range midpoint; hold to the close
+//  SWEEP  price runs the overnight (18:00-09:30) high/low after the open, then a 5m candle closes back inside → fade; stop = sweep extreme; target 1.5R
+//  IMOM   direction from yesterday's 16:00 close to 10:00 → enter at 15:30 in that direction; stop 0.25 x average daily range; exit at the close
+// Filters  daily trend (prior daily close vs 20-day EMA) · 15-minute structure · VWAP side (session VWAP from 09:30) · order flow (last 30 min of 1m candles)
+// ★ MAIN (Cole's main model) = up to 2 trades a day, one position at a time:
+//   ① ORB15 whenever the daily trend AND the 15-minute structure agree with the breakout, plus
+//   ② the first signal of the day (ORB15 / SWEEP / ORB30 / IMOM) in the daily trend's direction, if it's a different trade.
+// "First trade of the day" = the first ORB15 / ORB30 / SWEEP / IMOM signal that passes the filter; one trade per day.
+// The vault versions also use HVN and value-area candidates — this TradingView version leaves those out, so results differ a little.
+
+strategy("NQ Model Library (MNQ 5m)", shorttitle = "NQ Models", overlay = true, process_orders_on_close = true,
+     max_bars_back = 2000, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 200,
+     initial_capital = 50000, default_qty_type = strategy.fixed, default_qty_value = 2,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 0.5, slippage = 1, pyramiding = 0,
+     margin_long = 5, margin_short = 5)
+
+// ───────────────────────── Inputs ─────────────────────────
+string M0  = "★ MAIN: ORB15 (daily+15m) + first trade with daily trend"
+string M1  = "#1 First trade · daily trend"
+string M2  = "#2 ORB15 · daily trend"
+string M3  = "#3 SWEEP · VWAP side"
+string M4  = "#4 ORB15 · daily + 15m agree"
+string M5  = "#5 First trade · VWAP side"
+string M6  = "#6 SWEEP · no filter"
+string M7  = "#7 First trade · order flow"
+string M8  = "#8 First trade · daily + 15m agree"
+string M9  = "#9 SWEEP · order flow"
+string M10 = "#10 ORB30 · daily trend"
+model    = input.string(M0, "Model to trade", options = [M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10])
+simDays  = input.int(30, "Simulate the last N days", minval = 1, maxval = 120)
+showLvls = input.bool(true, "Draw levels (opening range, overnight, prior day, VWAP)")
+showAll  = input.bool(true, "Mark other models' signals with small dots")
+showTbl  = input.bool(true, "Show the ranking table")
+tblPos   = input.string("Top right", "Table position", options = ["Top right", "Bottom right", "Bottom left", "Top left"])
+
+string TZ = "America/New_York"
+int mn = hour(time, TZ) * 60 + minute(time, TZ)                   // bar OPEN time in minutes after midnight ET
+bool isRth = mn >= 570 and mn < 960
+bool rthStart = isRth and not (mn[1] >= 570 and mn[1] < 960)
+bool inWindow = time >= timenow - simDays * 86400000
+
+// ───────────────────────── Context ─────────────────────────
+// daily trend: prior completed daily close vs its 20-day EMA (+1 up / -1 down)
+int dTrend = nz(request.security(syminfo.tickerid, "D", close[1] > ta.ema(close, 20)[1] ? 1 : -1, lookahead = barmerge.lookahead_on))
+
+// 15-minute structure: +1 after a close above the last confirmed swing high, -1 below the last swing low
+f_structure(int len) =>
+    float ph = ta.pivothigh(high, len, len)
+    float pl = ta.pivotlow(low, len, len)
+    var float lastH = na
+    var float lastL = na
+    var int trend = 0
+    if not na(ph)
+        lastH := ph
+    if not na(pl)
+        lastL := pl
+    if not na(lastH) and close > lastH
+        trend := 1
+    if not na(lastL) and close < lastL
+        trend := -1
+    trend
+int s15 = nz(request.security(syminfo.tickerid, "15", f_structure(2)[1], lookahead = barmerge.lookahead_on))
+
+// order flow estimate: 1-minute up-candle volume = buying, down-candle = selling; last 6 five-minute bars = 30 minutes
+[ofO, ofC, ofV] = request.security_lower_tf(syminfo.tickerid, "1", [open, close, volume])
+float ofBuy = 0.0
+if array.size(ofV) > 0
+    for k = 0 to array.size(ofV) - 1
+        float vv = array.get(ofV, k)
+        ofBuy += array.get(ofC, k) > array.get(ofO, k) ? vv : array.get(ofC, k) == array.get(ofO, k) ? 0.5 * vv : 0.0
+float ofDelta = 2 * ofBuy - nz(volume)
+float flow30 = math.sum(volume, 6) > 0 ? math.sum(ofDelta, 6) / math.sum(volume, 6) : 0.0
+
+// session levels
+var float onH = na
+var float onL = na
+var float curH = na
+var float curL = na
+var float lastRthC = na
+var float pdH = na
+var float pdL = na
+var float pdC = na
+var float vwN = 0.0
+var float vwD = 0.0
+var array<float> ranges = array.new_float()
+var float or15H = na
+var float or15L = na
+var float or30H = na
+var float or30L = na
+var float c10 = na
+var bool doneORB15 = false
+var bool doneORB30 = false
+var bool doneSWEEP = false
+var bool doneIMOM = false
+var bool tradedToday = false
+var bool tradedA = false
+var float sweepHi = na
+var float sweepLo = na
+
+bool onStart = mn >= 1080 and not (mn[1] >= 1080)
+if onStart
+    onH := high
+    onL := low
+else if not isRth and (mn >= 1080 or mn < 570)
+    onH := na(onH) ? high : math.max(onH, high)
+    onL := na(onL) ? low : math.min(onL, low)
+
+if rthStart
+    if not na(curH)
+        pdH := curH
+        pdL := curL
+        pdC := lastRthC
+        array.push(ranges, curH - curL)
+        if array.size(ranges) > 14
+            array.shift(ranges)
+    curH := high
+    curL := low
+    vwN := 0.0
+    vwD := 0.0
+    or15H := na
+    or15L := na
+    or30H := na
+    or30L := na
+    c10 := na
+    doneORB15 := false
+    doneORB30 := false
+    doneSWEEP := false
+    doneIMOM := false
+    tradedToday := false
+    tradedA := false
+    sweepHi := high
+    sweepLo := low
+if isRth
+    curH := math.max(curH, high)
+    curL := math.min(curL, low)
+    lastRthC := close
+    vwN += close * volume
+    vwD += volume
+    sweepHi := math.max(nz(sweepHi, high), high)
+    sweepLo := math.min(nz(sweepLo, low), low)
+    if mn < 585
+        or15H := na(or15H) ? high : math.max(or15H, high)
+        or15L := na(or15L) ? low : math.min(or15L, low)
+    if mn < 600
+        or30H := na(or30H) ? high : math.max(or30H, high)
+        or30L := na(or30L) ? low : math.min(or30L, low)
+    if mn == 595
+        c10 := close
+float vwap = vwD > 0 ? vwN / vwD : close
+float avgRange = array.size(ranges) > 0 ? array.avg(ranges) : na
+
+// ───────────────────────── Signals (one event per setup per day) ─────────────────────────
+int sigORB15 = 0
+int sigORB30 = 0
+int sigSWEEP = 0
+int sigIMOM = 0
+float stORB15 = na
+float stORB30 = na
+float stSWEEP = na
+float stIMOM = na
+if isRth and mn >= 585 and mn < 690 and not doneORB15 and not na(or15H)
+    if close > or15H or close < or15L
+        sigORB15 := close > or15H ? 1 : -1
+        stORB15 := sigORB15 == 1 ? or15L : or15H
+        doneORB15 := true
+if isRth and mn >= 600 and mn < 690 and not doneORB30 and not na(or30H)
+    if close > or30H or close < or30L
+        sigORB30 := close > or30H ? 1 : -1
+        stORB30 := (or30H + or30L) / 2
+        doneORB30 := true
+if isRth and mn < 690 and not doneSWEEP and not na(onH)
+    if sweepHi > onH and close < onH and sweepHi - close > 2
+        sigSWEEP := -1
+        stSWEEP := sweepHi
+        doneSWEEP := true
+    else if sweepLo < onL and close > onL and close - sweepLo > 2
+        sigSWEEP := 1
+        stSWEEP := sweepLo
+        doneSWEEP := true
+if isRth and mn == 925 and not doneIMOM and not na(c10) and not na(pdC) and not na(avgRange) and c10 != pdC
+    sigIMOM := c10 > pdC ? 1 : -1
+    stIMOM := close - sigIMOM * 0.25 * avgRange
+    doneIMOM := true
+
+// filter: "daily", "m15", "both", "vwap", "flow", "none"
+f_pass(string flt, int d) =>
+    flt == "daily" ? dTrend == d : flt == "m15" ? s15 == d : flt == "both" ? (dTrend == d and s15 == d) :
+     flt == "vwap" ? (close - vwap) * d > 0 : flt == "flow" ? flow30 * d > 0 : true
+
+string mSetup = model == M0 ? "MAIN" : model == M2 or model == M4 ? "ORB15" : model == M3 or model == M6 or model == M9 ? "SWEEP" : model == M10 ? "ORB30" : "FIRST"
+string mFilt  = model == M0 or model == M1 or model == M2 or model == M10 ? "daily" : model == M3 or model == M5 ? "vwap" : model == M4 or model == M8 ? "both" :
+     model == M7 or model == M9 ? "flow" : "none"
+
+// pick this bar's signal for the selected model (priority if several fire on one bar: ORB15, SWEEP, ORB30, IMOM)
+int d = 0
+float stp = na
+float tgt = na
+string why = ""
+bool mainA = mSetup == "MAIN" and sigORB15 != 0 and not tradedA and f_pass("both", sigORB15)      // ① ORB15 with daily + 15m
+bool firstLike = mSetup == "FIRST" or (mSetup == "MAIN" and not tradedToday)                    // ② first daily-trend trade
+if mainA or ((mSetup == "ORB15" or firstLike) and sigORB15 != 0 and f_pass(mFilt, sigORB15))
+    d := sigORB15
+    stp := stORB15
+    tgt := close + d * 2.0 * math.abs(close - stp)
+    why := "ORB15"
+else if (mSetup == "SWEEP" or firstLike) and sigSWEEP != 0 and f_pass(mFilt, sigSWEEP)
+    d := sigSWEEP
+    stp := stSWEEP
+    tgt := close + d * 1.5 * math.abs(close - stp)
+    why := "SWEEP"
+else if (mSetup == "ORB30" or firstLike) and sigORB30 != 0 and f_pass(mFilt, sigORB30)
+    d := sigORB30
+    stp := stORB30
+    tgt := na
+    why := "ORB30"
+else if firstLike and sigIMOM != 0 and f_pass(mFilt, sigIMOM)
+    d := sigIMOM
+    stp := stIMOM
+    tgt := na
+    why := "IMOM"
+
+bool canTrade = inWindow and strategy.position_size == 0 and not (mSetup == "FIRST" and tradedToday) and (d == 1 ? stp < close : stp > close)
+if d != 0 and canTrade
+    string id = d == 1 ? "L" : "S"
+    strategy.entry(id, d == 1 ? strategy.long : strategy.short, comment = why)
+    if na(tgt)
+        strategy.exit(id + "X", id, stop = stp)
+    else
+        strategy.exit(id + "X", id, stop = stp, limit = tgt)
+    if mSetup != "MAIN" or f_pass("daily", d)
+        tradedToday := true
+    if mSetup == "MAIN" and why == "ORB15" and f_pass("both", d)
+        tradedA := true
+    float rr = na(tgt) ? na : math.abs(tgt - close) / math.abs(close - stp)
+    label.new(bar_index, d == 1 ? low : high,
+         (d == 1 ? "BUY " : "SELL ") + why + (na(rr) ? " → hold to close" : " " + str.tostring(rr, "#.#") + "R"),
+         style = d == 1 ? label.style_label_up : label.style_label_down,
+         color = d == 1 ? color.new(color.teal, 0) : color.new(color.red, 0), textcolor = color.white, size = size.small,
+         tooltip = model + "\nEntry " + str.tostring(close, format.mintick) + "\nStop " + str.tostring(stp, format.mintick) +
+         (na(tgt) ? "\nTarget: none, exit 15:55" : "\nTarget " + str.tostring(tgt, format.mintick)) +
+         "\nDaily trend " + (dTrend == 1 ? "up" : "down") + " · 15m " + (s15 == 1 ? "up" : s15 == -1 ? "down" : "flat") +
+         " · VWAP " + ((close - vwap) * d > 0 ? "with" : "against") + " · flow " + str.tostring(flow30 * d, "#.##"))
+if strategy.position_size != 0 and isRth and mn >= 955
+    strategy.close_all(comment = "15:55 flat")
+
+// other models' raw signals as small dots (grey = filtered out for the selected model)
+if showAll and inWindow
+    if sigORB15 != 0 and why != "ORB15"
+        label.new(bar_index, sigORB15 == 1 ? low : high, "", yloc = sigORB15 == 1 ? yloc.belowbar : yloc.abovebar,
+             style = sigORB15 == 1 ? label.style_triangleup : label.style_triangledown, color = color.new(color.orange, 40), size = size.tiny, tooltip = "ORB15 signal (not traded by this model)")
+    if sigSWEEP != 0 and why != "SWEEP"
+        label.new(bar_index, sigSWEEP == 1 ? low : high, "", yloc = sigSWEEP == 1 ? yloc.belowbar : yloc.abovebar,
+             style = sigSWEEP == 1 ? label.style_triangleup : label.style_triangledown, color = color.new(color.purple, 40), size = size.tiny, tooltip = "SWEEP signal (not traded by this model)")
+    if sigORB30 != 0 and why != "ORB30"
+        label.new(bar_index, sigORB30 == 1 ? low : high, "", yloc = sigORB30 == 1 ? yloc.belowbar : yloc.abovebar,
+             style = sigORB30 == 1 ? label.style_triangleup : label.style_triangledown, color = color.new(color.yellow, 40), size = size.tiny, tooltip = "ORB30 signal (not traded by this model)")
+
+// ───────────────────────── Levels ─────────────────────────
+plot(showLvls and isRth ? vwap : na, "Session VWAP", color = color.new(color.aqua, 20), style = plot.style_linebr)
+plot(showLvls and isRth and mn >= 585 ? or15H : na, "OR15 high", color = color.new(color.orange, 30), style = plot.style_linebr)
+plot(showLvls and isRth and mn >= 585 ? or15L : na, "OR15 low", color = color.new(color.orange, 30), style = plot.style_linebr)
+plot(showLvls and isRth and mn >= 600 ? or30H : na, "OR30 high", color = color.new(color.yellow, 50), style = plot.style_linebr)
+plot(showLvls and isRth and mn >= 600 ? or30L : na, "OR30 low", color = color.new(color.yellow, 50), style = plot.style_linebr)
+plot(showLvls and isRth ? onH : na, "Overnight high", color = color.new(color.purple, 30), style = plot.style_linebr)
+plot(showLvls and isRth ? onL : na, "Overnight low", color = color.new(color.purple, 30), style = plot.style_linebr)
+plot(showLvls and isRth ? pdH : na, "Prior day high", color = color.new(color.gray, 30), style = plot.style_linebr)
+plot(showLvls and isRth ? pdL : na, "Prior day low", color = color.new(color.gray, 30), style = plot.style_linebr)
+bgcolor(isRth and inWindow ? (dTrend == 1 ? color.new(color.green, 95) : color.new(color.red, 95)) : na, title = "Daily trend")
+
+// ───────────────────────── Ranking table (numbers from the vault, Jan 2023 – Nov 20, 2026, after MNQ costs) ─────────────────────────
+bool atLastBar = barstate.islastconfirmedhistory or barstate.isrealtime
+string tp = tblPos == "Top right" ? position.top_right : tblPos == "Bottom right" ? position.bottom_right : tblPos == "Bottom left" ? position.bottom_left : position.top_left
+var table tb = table.new(tp, 6, 14, bgcolor = color.new(color.black, 25), border_width = 0)
+f_cell(int c, int r, string s, color col) =>
+    table.cell(tb, c, r, s, text_color = col, text_size = size.tiny, text_halign = c == 0 ? text.align_left : text.align_center)
+if atLastBar and showTbl
+    color w = color.white
+    color g = color.gray
+    f_cell(0, 0, "NQ models (vault ranking)", color.orange)
+    f_cell(1, 0, "trades", g)
+    f_cell(2, 0, "won", g)
+    f_cell(3, 0, "avg R", g)
+    f_cell(4, 0, "yrs +", g)
+    f_cell(5, 0, "last 4 wk", g)
+    names = array.from(M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10)
+    ns  = array.from("565", "538", "270", "218", "162", "590", "427", "582", "326", "164", "267")
+    ws  = array.from("48%", "47%", "49%", "48%", "52%", "45%", "44%", "46%", "47%", "46%", "36%")
+    avs = array.from("+0.08", "+0.07", "+0.14", "+0.16", "+0.21", "+0.04", "+0.05", "+0.03", "+0.06", "+0.11", "+0.03")
+    ys  = array.from("3/4", "3/4", "4/4", "4/4", "4/4", "3/4", "3/4", "2/4", "3/4", "3/4", "2/4")
+    l4  = array.from("+7.9R", "+6.4R", "+2.5R", "-1.5R", "+3.5R", "-2.0R", "-0.4R", "-4.7R", "-3.9R", "-1.8R", "+9.3R")
+    for i = 0 to 10
+        string nm = array.get(names, i)
+        color c = nm == model ? color.lime : w
+        f_cell(0, i + 1, (nm == model ? "▶ " : "") + nm, c)
+        f_cell(1, i + 1, array.get(ns, i), c)
+        f_cell(2, i + 1, array.get(ws, i), c)
+        f_cell(3, i + 1, array.get(avs, i), c)
+        f_cell(4, i + 1, array.get(ys, i), c)
+        f_cell(5, i + 1, array.get(l4, i), str.startswith(array.get(l4, i), "-") ? color.red : color.lime)
+    f_cell(0, 12, "Now: daily " + (dTrend == 1 ? "UP" : "DOWN") + " · 15m " + (s15 == 1 ? "UP" : s15 == -1 ? "DOWN" : "flat") +
+         " · " + (close > vwap ? "above" : "below") + " VWAP · flow " + str.tostring(flow30, "#.##"), color.orange)
+    f_cell(0, 13, "No result is guaranteed. #10 replaces the vault's HVN+flow model (that one runs in the HVN script).", g)
