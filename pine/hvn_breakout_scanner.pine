@@ -39,6 +39,11 @@ needTrend = input.bool(false, "Only auto-take big breakouts that agree with 15m 
 minProb   = input.float(0, "Only auto-take if score ≥ (0 = off)", minval = 0, maxval = 95, step = 5, group = grpB)
 minTgtPct = input.float(0.0, "Skip trades whose target is closer than x% (0 = off; fees are ~0.2% round trip)", minval = 0, step = 0.1, group = grpB)
 stopBuf   = input.float(0.0, "Extra stop buffer (x ATR beyond the stop level)", minval = 0, step = 0.25, group = grpB)
+exitMode  = input.string("Fixed", "Exit mode", options = ["Fixed", "Trail", "Partial"], group = grpB,
+     tooltip = "Fixed: stop + HVN target. Trail: no target, ATR trailing stop once +1R. Partial: half at the HVN target, trail the rest from breakeven.")
+beAtR     = input.float(0.0, "Move stop to breakeven at +x R (0 = off)", minval = 0, step = 0.5, group = grpB)
+trailAtr  = input.float(1.0, "Trailing stop distance (x ATR)", minval = 0.25, step = 0.25, group = grpB)
+timeStop  = input.int(0, "Time stop: exit after N bars if never +0.5R (0 = off)", minval = 0, group = grpB)
 
 grpT      = "15m market structure"
 htfLen    = input.int(2, "15m swing strength (bars each side)", minval = 1, maxval = 10, group = grpT)
@@ -202,6 +207,17 @@ var float openRisk  = na
 var float openTgt   = na
 var string openSide = ""
 
+// Exit management state (mirrors the Python research's step_exit)
+var float xEntry   = na
+var float xRisk    = na
+var float xBest    = na
+var float xStop    = na
+var float xTgt     = na
+var float xQty     = na
+var int   xDir     = 0
+var int   xBar     = na
+var bool  xPartial = false
+
 // Drawings for the open trade (position-tool style)
 var box  tpBox     = na
 var box  slBox     = na
@@ -241,6 +257,33 @@ if strategy.position_size != 0 and not na(tpBox)
     tpBox.set_right(bar_index)
     slBox.set_right(bar_index)
     entryLine.set_x2(bar_index)
+
+// ───────────────────────── Exit management (breakeven / trailing / partial / time stop) ─────────────────────────
+// Runs at each bar close after that bar's fills; new stop levels apply from the next bar (same as the research).
+if strategy.position_size != 0 and not na(xBar) and bar_index > xBar
+    if na(xQty)
+        xQty := math.abs(strategy.position_size)
+    xBest := xDir == 1 ? math.max(xBest, high) : math.min(xBest, low)
+    float mfeR = (xBest - xEntry) * xDir / xRisk
+    if exitMode == "Partial" and not xPartial and math.abs(strategy.position_size) < xQty * 0.75
+        xPartial := true
+        xStop := xDir == 1 ? math.max(xStop, xEntry) : math.min(xStop, xEntry)
+    if beAtR > 0 and mfeR >= beAtR
+        xStop := xDir == 1 ? math.max(xStop, xEntry) : math.min(xStop, xEntry)
+    if (exitMode == "Trail" and mfeR >= 1.0) or (exitMode == "Partial" and xPartial)
+        float trailLvl = xBest - xDir * trailAtr * atr
+        xStop := xDir == 1 ? math.max(xStop, trailLvl) : math.min(xStop, trailLvl)
+    string xid = xDir == 1 ? "L" : "S"
+    if exitMode == "Fixed"
+        strategy.exit(xid + "X", xid, stop = xStop, limit = xTgt)
+    else if exitMode == "Trail"
+        strategy.exit(xid + "X", xid, stop = xStop)
+    else
+        if not xPartial
+            strategy.exit(xid + "X1", xid, qty_percent = 50, stop = xStop, limit = xTgt)
+        strategy.exit(xid + "X2", xid, stop = xStop)
+    if (timeStop > 0 and bar_index - xBar >= timeStop and mfeR < 0.5) or bar_index - xBar >= 1440
+        strategy.close(xid, comment = "time")
 
 // ───────────────────────── Signal tracking ─────────────────────────
 // Every signal (taken or not) is followed until price hits its target or stop
@@ -443,14 +486,25 @@ if inWindow and inSess and bar_index > profBars + 5
         if take
             openRisk := risk
             openTgt  := tgt
-            if dir == 1
-                openSide := "LONG"
-                strategy.entry("L", strategy.long)
-                strategy.exit("LX", "L", stop = stp, limit = tgt)
+            xEntry := close
+            xRisk := risk
+            xBest := close
+            xStop := stp
+            xTgt := tgt
+            xDir := dir
+            xBar := bar_index
+            xQty := na
+            xPartial := false
+            string eid = dir == 1 ? "L" : "S"
+            openSide := dir == 1 ? "LONG" : "SHORT"
+            strategy.entry(eid, dir == 1 ? strategy.long : strategy.short)
+            if exitMode == "Fixed"
+                strategy.exit(eid + "X", eid, stop = stp, limit = tgt)
+            else if exitMode == "Trail"
+                strategy.exit(eid + "X", eid, stop = stp)
             else
-                openSide := "SHORT"
-                strategy.entry("S", strategy.short)
-                strategy.exit("SX", "S", stop = stp, limit = tgt)
+                strategy.exit(eid + "X1", eid, qty_percent = 50, stop = stp, limit = tgt)
+                strategy.exit(eid + "X2", eid, stop = stp)
         else
             probOnly += 1
 
