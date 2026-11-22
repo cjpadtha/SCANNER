@@ -36,7 +36,7 @@ atrLen    = input.int(14, "ATR length", minval = 1, group = grpB)
 stopMode  = input.string("Candle 1", "Stop placement", options = ["Candle 1", "Zone midpoint", "Zone far edge"], group = grpB)
 fallbackR = input.float(2.0, "Target R when there is no next HVN", minval = 0.5, step = 0.5, group = grpB)
 needTrend = input.bool(false, "Only auto-take big breakouts that agree with 15m structure", group = grpB)
-minProb   = input.float(0, "Only auto-take if probability ≥ (0 = off)", minval = 0, maxval = 95, step = 5, group = grpB)
+minProb   = input.float(0, "Only auto-take if score ≥ (0 = off)", minval = 0, maxval = 95, step = 5, group = grpB)
 minTgtPct = input.float(0.0, "Skip trades whose target is closer than x% (0 = off; fees are ~0.2% round trip)", minval = 0, step = 0.1, group = grpB)
 stopBuf   = input.float(0.0, "Extra stop buffer (x ATR beyond the stop level)", minval = 0, step = 0.25, group = grpB)
 
@@ -51,16 +51,31 @@ sweepLook = input.int(30, "Supporting sweep must be within N bars", minval = 1, 
 grpF      = "Fair value gaps (1m)"
 fvgMinAtr = input.float(0.0, "Minimum FVG size (x ATR)", minval = 0.0, step = 0.05, group = grpF)
 
-grpP      = "Probability weights (heuristic score, not a statistic)"
+grpP      = "Score weights (points, not a probability — see the stats table for real win rates)"
 wBase     = input.float(50, "Base", group = grpP)
 wTrend    = input.float(15, "15m structure with (+) / against (−)", group = grpP)
 wFvg      = input.float(10, "FVG in breakout direction (+)", group = grpP)
 wSweep    = input.float(10, "Opposite-side sweep before breakout (+)", group = grpP)
 wTrap     = input.float(20, "Breakout candle swept a level and closed back (−)", group = grpP)
 wBig      = input.float(10, "Big breakout candle (+)", group = grpP)
+wVol      = input.float(0, "High breakout volume (+)  [new check, 0 until stats show it helps]", group = grpP)
+wVwap     = input.float(0, "Breakout on the right side of VWAP (+)  [new check]", group = grpP)
+wExt      = input.float(0, "Extended / chasing breakout (−)  [new check]", group = grpP)
+
+grpC      = "New checks"
+relVolMin = input.float(1.5, "High volume = breakout candles' avg volume ≥ x the 20-bar average", minval = 0.5, step = 0.1, group = grpC)
+extAtr    = input.float(2.0, "Extended = candle-2 close more than x ATR past the zone edge", minval = 0.5, step = 0.25, group = grpC)
+
+grpX      = "Signal tracking (measured win rates)"
+feePct    = input.float(0.1, "Fee per fill % used in the stats (match Properties → Commission)", minval = 0, step = 0.01, group = grpX)
+maxHold   = input.int(240, "Signal outcome: give up after N bars (scored at that bar's close)", minval = 5, group = grpX)
+minN      = input.int(10, "Minimum resolved signals before a win rate is shown", minval = 1, group = grpX)
+needEdge  = input.bool(false, "Only auto-take if this signal's score band has made money so far (avg R > 0)", group = grpX)
+showStats = input.bool(true, "Show the signal stats table", group = grpX)
+statsPos  = input.string("Bottom left", "Signal stats table position", options = ["Bottom left", "Top left", "Top right"], group = grpX)
 
 grpA      = "Alerts"
-alertAll  = input.bool(false, "Also alert on probability-only (not taken) signals", group = grpA)
+alertAll  = input.bool(false, "Also alert on not-taken signals", group = grpA)
 
 grpD      = "Display"
 showBoxes = input.bool(true, "Draw entry / stop / target boxes on trades", group = grpD)
@@ -91,6 +106,8 @@ htfTrend = nz(request.security(syminfo.tickerid, "15", f_structure(htfLen)[1], l
 
 // ───────────────────────── 1m helpers ─────────────────────────
 atr = ta.atr(atrLen)
+vwapLine = ta.vwap(hlc3)
+volAvg   = ta.sma(volume, 20)
 
 // Fair value gaps (3-candle imbalance) on the breakout candles
 bullFvgNow = low > high[2] and (low - high[2]) >= fvgMinAtr * atr
@@ -225,6 +242,94 @@ if strategy.position_size != 0 and not na(tpBox)
     slBox.set_right(bar_index)
     entryLine.set_x2(bar_index)
 
+// ───────────────────────── Signal tracking ─────────────────────────
+// Every signal (taken or not) is followed until price hits its target or stop
+// (both in one bar = stop, to be conservative) or until maxHold bars pass.
+// Result is in R after fees. These are the "real" win rates.
+int sessIdx = not na(time(timeframe.period, "0930-1600", TZ)) ? 2 : not na(time(timeframe.period, "0300-0930", TZ)) ? 1 : 0
+
+int NF = 9
+var array<string> fNames = array.from("15m structure WITH", "15m structure AGAINST", "FVG in direction", "Opposite-side sweep",
+     "Trap sweep", "Big candle 2", "High volume", "VWAP side WITH", "Extended (chasing)")
+var array<float> fyN = array.new_float(9, 0.0)
+var array<float> fyW = array.new_float(9, 0.0)
+var array<float> fyR = array.new_float(9, 0.0)
+var array<float> fnN = array.new_float(9, 0.0)
+var array<float> fnW = array.new_float(9, 0.0)
+var array<float> fnR = array.new_float(9, 0.0)
+var array<float> bN  = array.new_float(4, 0.0)
+var array<float> bW  = array.new_float(4, 0.0)
+var array<float> bR  = array.new_float(4, 0.0)
+var array<float> sN  = array.new_float(3, 0.0)
+var array<float> sW  = array.new_float(3, 0.0)
+var array<float> sR  = array.new_float(3, 0.0)
+var float aN = 0.0
+var float aW = 0.0
+var float aR = 0.0
+
+var array<int>   pDir    = array.new_int()
+var array<float> pEntry  = array.new_float()
+var array<float> pStop   = array.new_float()
+var array<float> pTgt    = array.new_float()
+var array<int>   pBar    = array.new_int()
+var array<int>   pFlags  = array.new_int()
+var array<int>   pBucket = array.new_int()
+var array<int>   pSess   = array.new_int()
+
+f_add(array<float> a, int i, float v) =>
+    array.set(a, i, array.get(a, i) + v)
+f_bit(int m, int i) =>
+    math.floor(m / math.pow(2, i)) % 2 == 1
+f_bucket(float sc) =>
+    sc < 50 ? 0 : sc < 65 ? 1 : sc < 80 ? 2 : 3
+f_r(float v) =>
+    (v >= 0 ? "+" : "") + str.tostring(v, "#.##") + "R"
+
+if array.size(pDir) > 0
+    for k = array.size(pDir) - 1 to 0
+        if bar_index > array.get(pBar, k)
+            int   sd = array.get(pDir, k)
+            float se = array.get(pEntry, k)
+            float ss = array.get(pStop, k)
+            float st = array.get(pTgt, k)
+            float rk = math.abs(se - ss)
+            bool hitSl   = sd == 1 ? low <= ss : high >= ss
+            bool hitTp   = sd == 1 ? high >= st : low <= st
+            bool expired = bar_index - array.get(pBar, k) >= maxHold
+            if hitSl or hitTp or expired
+                float gross = hitSl ? -1.0 : hitTp ? math.abs(st - se) / rk : (close - se) * sd / rk
+                float net   = gross - 2.0 * feePct / 100.0 * se / rk
+                float win   = net > 0 ? 1.0 : 0.0
+                aN += 1.0
+                aW += win
+                aR += net
+                int bk = array.get(pBucket, k)
+                f_add(bN, bk, 1.0)
+                f_add(bW, bk, win)
+                f_add(bR, bk, net)
+                int si = array.get(pSess, k)
+                f_add(sN, si, 1.0)
+                f_add(sW, si, win)
+                f_add(sR, si, net)
+                int fl = array.get(pFlags, k)
+                for i = 0 to NF - 1
+                    if f_bit(fl, i)
+                        f_add(fyN, i, 1.0)
+                        f_add(fyW, i, win)
+                        f_add(fyR, i, net)
+                    else
+                        f_add(fnN, i, 1.0)
+                        f_add(fnW, i, win)
+                        f_add(fnR, i, net)
+                array.remove(pDir, k)
+                array.remove(pEntry, k)
+                array.remove(pStop, k)
+                array.remove(pTgt, k)
+                array.remove(pBar, k)
+                array.remove(pFlags, k)
+                array.remove(pBucket, k)
+                array.remove(pSess, k)
+
 // ───────────────────────── Scanner ─────────────────────────
 if inWindow and inSess and bar_index > profBars + 5
     // Profile from the 2h BEFORE candle 1, so the breakout candles don't shape their own zone
@@ -261,6 +366,15 @@ if inWindow and inSess and bar_index > profBars + 5
         p += sweepOk ? wSweep : 0.0
         p -= trap ? wTrap : 0.0
         p += big ? wBig : 0.0
+
+        // New checks (each measures something different: participation, intraday bias, chasing)
+        bool  volHigh  = volAvg[2] > 0 and (volume + volume[1]) / 2 >= relVolMin * volAvg[2]
+        bool  vwapWith = dir == 1 ? close > vwapLine : close < vwapLine
+        float extAmt   = atr > 0 ? (dir == 1 ? (close - zT) / atr : (zB - close) / atr) : 0.0
+        bool  extended = extAmt > extAtr
+        p += volHigh ? wVol : 0.0
+        p += vwapWith ? wVwap : 0.0
+        p -= extended ? wExt : 0.0
         p := math.max(5.0, math.min(95.0, p))
 
         // Stop
@@ -287,11 +401,44 @@ if inWindow and inSess and bar_index > profBars + 5
         float tgtPct = 100.0 * math.abs(tgt - close) / close
         bool probOk  = minProb <= 0 or p >= minProb
         bool distOk  = minTgtPct <= 0 or tgtPct >= minTgtPct
+        // What has actually happened to earlier signals in this score band
+        int   bk      = f_bucket(p)
+        float bn      = array.get(bN, bk)
+        float histW   = bn > 0 ? 100.0 * array.get(bW, bk) / bn : na
+        float histR   = bn > 0 ? array.get(bR, bk) / bn : na
+        float feeR    = risk > 0 ? 2.0 * feePct / 100.0 * close / risk : na
+        float needWin = plannedR > 0 ? 100.0 * (1.0 + feeR) / (plannedR + 1.0) : na
+        string histTxt = bn >= minN ? str.tostring(histW, "#") + "% won (n" + str.tostring(bn, "#") + ")" : "win rate n/a (n" + str.tostring(bn, "#") + ")"
+        bool edgeOk   = not needEdge or (bn >= minN and histR > 0)
+
         bool flat  = strategy.position_size == 0
-        bool take  = big and risk > 0 and stopOk and flat and (not needTrend or trendWith) and probOk and distOk
+        bool take  = big and risk > 0 and stopOk and flat and (not needTrend or trendWith) and probOk and distOk and edgeOk
         string why = not big ? "not a big breakout" : not flat ? "already in a trade" : (risk <= 0 or not stopOk) ? "invalid stop" :
-             (needTrend and not trendWith) ? "against 15m structure" : not probOk ? "probability below minimum" :
-             not distOk ? "target only " + str.tostring(tgtPct, "#.##") + "% away" : ""
+             (needTrend and not trendWith) ? "against 15m structure" : not probOk ? "score below minimum" :
+             not distOk ? "target only " + str.tostring(tgtPct, "#.##") + "% away" :
+             not edgeOk ? (bn < minN ? "not enough history for this score band" : "this score band has lost money so far") : ""
+
+        // Follow this signal to see what really happens
+        if risk > 0 and stopOk
+            int fl = (trendWith ? 1 : 0) + (trendAgainst ? 2 : 0) + (fvgOk ? 4 : 0) + (sweepOk ? 8 : 0) + (trap ? 16 : 0) +
+                 (big ? 32 : 0) + (volHigh ? 64 : 0) + (vwapWith ? 128 : 0) + (extended ? 256 : 0)
+            array.push(pDir, dir)
+            array.push(pEntry, close)
+            array.push(pStop, stp)
+            array.push(pTgt, tgt)
+            array.push(pBar, bar_index)
+            array.push(pFlags, fl)
+            array.push(pBucket, bk)
+            array.push(pSess, sessIdx)
+            if array.size(pDir) > 300
+                array.shift(pDir)
+                array.shift(pEntry)
+                array.shift(pStop)
+                array.shift(pTgt)
+                array.shift(pBar)
+                array.shift(pFlags)
+                array.shift(pBucket)
+                array.shift(pSess)
 
         if take
             openRisk := risk
@@ -314,6 +461,13 @@ if inWindow and inSess and bar_index > profBars + 5
              "\nSupporting sweep: " + (sweepOk ? "yes" : "no") +
              "\nTrap sweep on breakout: " + (trap ? "YES" : "no") +
              "\nBig candle 2: " + (big ? "yes" : "no") +
+             "\nHigh volume: " + (volHigh ? "yes" : "no") +
+             "\nVWAP side: " + (vwapWith ? "with" : "against") +
+             "\nExtended: " + (extended ? "YES (" + str.tostring(extAmt, "#.#") + " ATR past zone)" : "no") +
+             "\nSession: " + (sessIdx == 2 ? "NY" : sessIdx == 1 ? "London" : "Asia / other") +
+             "\n\nScore: " + str.tostring(p, "#") + " (points, not a probability)" +
+             "\nThis score band so far: " + histTxt + (bn > 0 ? ", avg " + f_r(histR) : "") +
+             "\nBreak-even win rate for this trade: " + str.tostring(needWin, "#") + "% (incl. fees)" +
              "\nEntry: " + str.tostring(close, format.mintick) +
              "\nStop: " + str.tostring(stp, format.mintick) +
              "\nTarget: " + str.tostring(tgt, format.mintick) + " (" + tgtSrc + ", " + str.tostring(plannedR, "#.##") + "R, " + str.tostring(tgtPct, "#.##") + "% away)" +
@@ -322,7 +476,8 @@ if inWindow and inSess and bar_index > profBars + 5
         if take
             // Trade taken: one label with side, probability, R:R and entry, plus target/stop boxes
             label.new(bar_index, dir == 1 ? low : high,
-                 (dir == 1 ? "BUY " : "SELL ") + str.tostring(p, "#") + "% · " + rr + "\n@ " + str.tostring(close, format.mintick),
+                 (dir == 1 ? "BUY " : "SELL ") + rr + " @ " + str.tostring(close, format.mintick) +
+                 "\nscore " + str.tostring(p, "#") + " · " + histTxt + " · need " + str.tostring(needWin, "#") + "%",
                  style = dir == 1 ? label.style_label_up : label.style_label_down,
                  color = dir == 1 ? color.new(color.teal, 0) : color.new(color.red, 0),
                  textcolor = color.white, size = size.small, tooltip = tip)
@@ -339,7 +494,7 @@ if inWindow and inSess and bar_index > profBars + 5
                      text_valign = dir == 1 ? text.align_bottom : text.align_top)
                 entryLine := line.new(bar_index, close, bar_index + 1, close, color = color.new(color.white, 30), width = 1)
         else if probStyle == "Labels"
-            label.new(bar_index, dir == 1 ? low : high, head + str.tostring(p, "#") + "%",
+            label.new(bar_index, dir == 1 ? low : high, head + "score " + str.tostring(p, "#"),
                  style = dir == 1 ? label.style_label_up : label.style_label_down,
                  color = color.new(color.gray, 30), textcolor = color.white, size = size.tiny, tooltip = tip)
         else if probStyle == "Small dots"
@@ -347,11 +502,11 @@ if inWindow and inSess and bar_index > profBars + 5
                  yloc = dir == 1 ? yloc.belowbar : yloc.abovebar,
                  style = dir == 1 ? label.style_triangleup : label.style_triangledown,
                  color = color.new(color.gray, 40), size = size.tiny,
-                 tooltip = head + str.tostring(p, "#") + "% · " + rr + "\n" + tip)
+                 tooltip = head + "score " + str.tostring(p, "#") + " · " + rr + "\n" + tip)
 
         // Phone / app alert: create an alert on this strategy with "alert() function calls only"
         if take or alertAll
-            alert(syminfo.ticker + " " + head + str.tostring(p, "#") + "% | entry " + str.tostring(close, format.mintick) +
+            alert(syminfo.ticker + " " + head + "score " + str.tostring(p, "#") + " (" + histTxt + ") | entry " + str.tostring(close, format.mintick) +
                  " stop " + str.tostring(stp, format.mintick) + " target " + str.tostring(tgt, format.mintick) +
                  " (" + str.tostring(plannedR, "#.##") + "R)" + (take ? "" : " | not taken: " + why), alert.freq_once_per_bar_close)
 
@@ -416,3 +571,50 @@ if barstate.islast and tblPosIn != "Hidden"
     table.cell(tb, 1, 4, str.tostring(probOnly), text_color = w, text_size = ts)
     table.cell(tb, 0, 5, "Open trade", text_color = dm, text_size = ts, text_halign = text.align_left)
     table.cell(tb, 1, 5, strategy.position_size != 0 ? openSide : "none", text_color = w, text_size = ts)
+
+// ───────────────────────── Signal stats table ─────────────────────────
+// What actually happened to every signal in the window, after fees.
+f_row(table t, int r, string name, float n, float w, float sr, string extra, color nameCol) =>
+    color g = color.new(color.gray, 0)
+    table.cell(t, 0, r, name, text_color = nameCol, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(t, 1, r, str.tostring(n, "#"), text_color = g, text_size = size.tiny)
+    table.cell(t, 2, r, n > 0 ? str.tostring(100.0 * w / n, "#") + "%" : "–", text_color = color.white, text_size = size.tiny)
+    table.cell(t, 3, r, n > 0 ? f_r(sr / n) : "–", text_color = n > 0 ? (sr > 0 ? color.lime : color.red) : g, text_size = size.tiny)
+    table.cell(t, 4, r, extra, text_color = g, text_size = size.tiny)
+
+f_head(table t, int r, string txt) =>
+    table.cell(t, 0, r, txt, text_color = color.orange, text_size = size.tiny, text_halign = text.align_left)
+
+string sPos = statsPos == "Top left" ? position.top_left : statsPos == "Top right" ? position.top_right : position.bottom_left
+var table st = table.new(sPos, 5, 23, bgcolor = color.new(color.black, 25), border_width = 0)
+varip bool stMerged = false
+if barstate.islast and showStats
+    color w = color.white
+    table.cell(st, 0, 0, "What really happened (all signals, after fees)", text_color = w, text_size = size.small, text_halign = text.align_left)
+    table.cell(st, 0, 1, "", text_size = size.tiny)
+    table.cell(st, 1, 1, "n", text_color = color.gray, text_size = size.tiny)
+    table.cell(st, 2, 1, "won", text_color = color.gray, text_size = size.tiny)
+    table.cell(st, 3, 1, "avg R", text_color = color.gray, text_size = size.tiny)
+    table.cell(st, 4, 1, "avg R without", text_color = color.gray, text_size = size.tiny)
+    f_row(st, 2, "All signals", aN, aW, aR, "", w)
+    f_head(st, 3, "By score")
+    f_row(st, 4, "under 50", array.get(bN, 0), array.get(bW, 0), array.get(bR, 0), "", w)
+    f_row(st, 5, "50 – 64", array.get(bN, 1), array.get(bW, 1), array.get(bR, 1), "", w)
+    f_row(st, 6, "65 – 79", array.get(bN, 2), array.get(bW, 2), array.get(bR, 2), "", w)
+    f_row(st, 7, "80 +", array.get(bN, 3), array.get(bW, 3), array.get(bR, 3), "", w)
+    f_head(st, 8, "By check (when present)")
+    for i = 0 to NF - 1
+        float nn = array.get(fnN, i)
+        f_row(st, 9 + i, array.get(fNames, i), array.get(fyN, i), array.get(fyW, i), array.get(fyR, i),
+             nn > 0 ? f_r(array.get(fnR, i) / nn) : "–", w)
+    f_head(st, 18, "By session (ET)")
+    f_row(st, 19, "Asia / other", array.get(sN, 0), array.get(sW, 0), array.get(sR, 0), "", w)
+    f_row(st, 20, "London 03:00–09:30", array.get(sN, 1), array.get(sW, 1), array.get(sR, 1), "", w)
+    f_row(st, 21, "NY 09:30–16:00", array.get(sN, 2), array.get(sW, 2), array.get(sR, 2), "", w)
+    table.cell(st, 0, 22, "A check helps if its avg R is clearly above 'avg R without'. Need ~30+ in a row to trust it.",
+         text_color = color.gray, text_size = size.tiny, text_halign = text.align_left)
+if barstate.islast and showStats and not stMerged
+    // merge header / note rows once (merging the same cells twice can error)
+    for r in array.from(0, 3, 8, 18, 22)
+        table.merge_cells(st, 0, r, 4, r)
+    stMerged := true
