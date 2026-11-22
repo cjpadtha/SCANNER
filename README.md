@@ -37,7 +37,7 @@ Once added, it shows in the phone app too.
 - *Simulate the last N hours* — default 24. Raise it (e.g. 72–168) for more trades; free plans load fewer 1m bars.
 - *Only signal during* — all hours (default; BTC trades 24/7), NY stock-market hours, or the 09:30–11:00 ET killzone, when BTC volume is usually highest.
 - *Only auto-take breakouts that agree with 15m structure* — off by default.
-- Sizing is 10% of equity; costs are 0.1% commission per fill (typical taker fee). Set your exchange's fee in **Properties**. On 1m trades fees matter a lot: 0.2% round trip is ~$190 on a $95k BTC move, so a target only a few hundred dollars away loses a big share to fees.
+- Sizing is 10% of equity; costs are 0.1% commission per fill (typical taker fee). Set your exchange's fee in **Properties**. On 1m trades fees matter a lot: 0.2% round trip is about $190 per BTC at a $95k price, so a target only a few hundred dollars away loses a big share of it to fees.
 
 **Phone alerts:** Alert (clock icon) → Condition: **HVN Breakout** → **alert() function calls only** → turn on **Notify in app**. You'll get the side, probability, entry, stop and target for every trade taken. Turn on *Also alert on probability-only signals* in settings to get the grey ones too.
 
