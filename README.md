@@ -39,6 +39,15 @@ Once added, it shows in the phone app too.
 - *Only auto-take breakouts that agree with 15m structure* — off by default.
 - Sizing is 10% of equity; costs are 0.1% commission per fill (typical taker fee). Set your exchange's fee in **Properties**. On 1m trades fees matter a lot: 0.2% round trip is about $190 per BTC at a $95k price, so a target only a few hundred dollars away loses a big share of it to fees.
 
+**What's on the chart:**
+
+- **Trades taken:** a teal BUY / red SELL label with probability, planned R:R and entry price, plus a green target box and red stop box (like TradingView's position tool) that end where the trade exits, with the result in R printed there.
+- **Not-taken signals:** small grey triangles — hover one for its probability and reasons. Switch to full labels or off under *Display*.
+- **HVN zones** (last 2h): green = support below price, red = resistance above, orange = price inside. Dotted line = zone midpoint (the trade target). The label shows the price range and the zone's share of 2h volume.
+- **Stats table** bottom right (movable / hideable under *Display*).
+
+**Turn off TradingView's own trade markers** (the purple L / LX / S / SX arrows with `+0.0166` sizes): strategy settings (gear) → **Style** → untick **Trades on chart**. Scripts can't hide these themselves.
+
 **Phone alerts:** Alert (clock icon) → Condition: **HVN Breakout** → **alert() function calls only** → turn on **Notify in app**. You'll get the side, probability, entry, stop and target for every trade taken. Turn on *Also alert on probability-only signals* in settings to get the grey ones too.
 
 ## Reading the results

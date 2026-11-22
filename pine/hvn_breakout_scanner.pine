@@ -15,7 +15,7 @@
 // Costs: 0.1% commission per fill (typical exchange taker fee). Change it in Properties for your exchange.
 
 strategy("HVN Breakout Scanner (BTC 1m)", shorttitle = "HVN Breakout", overlay = true, process_orders_on_close = true,
-     max_bars_back = 1000, max_labels_count = 500, max_boxes_count = 200,
+     max_bars_back = 1000, max_labels_count = 500, max_boxes_count = 300, max_lines_count = 300,
      initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10,
      commission_type = strategy.commission.percent, commission_value = 0.1, pyramiding = 0)
 
@@ -58,6 +58,12 @@ wBig      = input.float(10, "Big breakout candle (+)", group = grpP)
 
 grpA      = "Alerts"
 alertAll  = input.bool(false, "Also alert on probability-only (not taken) signals", group = grpA)
+
+grpD      = "Display"
+showBoxes = input.bool(true, "Draw entry / stop / target boxes on trades", group = grpD)
+showRes   = input.bool(true, "Print R result at each exit", group = grpD)
+probStyle = input.string("Small dots", "Not-taken signals", options = ["Off", "Small dots", "Labels"], group = grpD)
+tblPosIn  = input.string("Bottom right", "Stats table", options = ["Top right", "Bottom right", "Bottom left", "Hidden"], group = grpD)
 
 // ───────────────────────── 15m structure ─────────────────────────
 // Bullish after a close above the last confirmed 15m swing high, bearish after a close below the last swing low.
@@ -129,6 +135,7 @@ f_zones(int off, int n, int nRows, float mult) =>
     cMin = array.new_float(nRows, na)
     tops = array.new_float()
     bots = array.new_float()
+    zv   = array.new_float()
     if step > 0
         for i = off to off + n - 1
             int idx = math.max(0, math.min(nRows - 1, math.floor((close[i] - lo) / step)))
@@ -140,18 +147,22 @@ f_zones(int off, int n, int nRows, float mult) =>
         float thr = array.avg(vols) * mult
         float gTop = na
         float gBot = na
+        float gVol = 0.0
         for r = 0 to nRows - 1
             float v = array.get(vols, r)
             bool isH = v > 0 and v >= thr
             if isH
                 gTop := na(gTop) ? array.get(cMax, r) : math.max(gTop, array.get(cMax, r))
                 gBot := na(gBot) ? array.get(cMin, r) : math.min(gBot, array.get(cMin, r))
+                gVol += v
             if (not isH or r == nRows - 1) and not na(gTop)
                 array.push(tops, gTop)
                 array.push(bots, gBot)
+                array.push(zv, gVol)
                 gTop := na
                 gBot := na
-    [tops, bots]
+                gVol := 0.0
+    [tops, bots, zv]
 
 // ───────────────────────── State ─────────────────────────
 inWindow = time >= timenow - simHours * 3600000
@@ -171,6 +182,11 @@ var float openRisk  = na
 var float openTgt   = na
 var string openSide = ""
 
+// Drawings for the open trade (position-tool style)
+var box  tpBox     = na
+var box  slBox     = na
+var line entryLine = na
+
 // Record R for each closed trade (uses the Strategy Tester's actual fills)
 int ct = strategy.closedtrades
 if ct > lastCt
@@ -179,18 +195,37 @@ if ct > lastCt
         float ex = strategy.closedtrades.exit_price(j)
         float d  = strategy.closedtrades.size(j) > 0 ? 1.0 : -1.0
         float r  = openRisk > 0 ? (ex - en) * d / openRisk : 0.0
+        int   xb = strategy.closedtrades.exit_bar_index(j)
         netR += r
         trades += 1
         if r > 0
             wins += 1
         else
             losses += 1
+        // close off the boxes at the exit bar
+        if not na(tpBox)
+            tpBox.set_right(xb)
+            slBox.set_right(xb)
+            entryLine.set_x2(xb)
+            tpBox     := na
+            slBox     := na
+            entryLine := na
+        if showRes
+            label.new(xb, ex, (r >= 0 ? "+" : "") + str.tostring(r, "#.##") + "R",
+                 style = label.style_label_left, color = color.new(color.black, 100),
+                 textcolor = r >= 0 ? color.lime : color.red, size = size.small)
     lastCt := ct
+
+// stretch the open trade's boxes to the current bar
+if strategy.position_size != 0 and not na(tpBox)
+    tpBox.set_right(bar_index)
+    slBox.set_right(bar_index)
+    entryLine.set_x2(bar_index)
 
 // ───────────────────────── Scanner ─────────────────────────
 if inWindow and inSess and bar_index > profBars + 5
     // Profile from the 2h BEFORE candle 1, so the breakout candles don't shape their own zone
-    [tops, bots] = f_zones(2, profBars, rows, hvnMult)
+    [tops, bots, zvols] = f_zones(2, profBars, rows, hvnMult)
     int n = array.size(tops)
     int dir = 0
     float zT = na
@@ -274,10 +309,36 @@ if inWindow and inSess and bar_index > profBars + 5
              "\nStop: " + str.tostring(stp, format.mintick) +
              "\nTarget: " + str.tostring(tgt, format.mintick) + " (" + tgtSrc + ", " + str.tostring(plannedR, "#.##") + "R)" +
              (take ? "" : "\nNot taken: " + why)
-        color c = take ? (dir == 1 ? color.new(color.green, 0) : color.new(color.red, 0)) : color.new(color.gray, 10)
-        label.new(bar_index, dir == 1 ? low : high, head + str.tostring(p, "#") + "%",
-             style = dir == 1 ? label.style_label_up : label.style_label_down,
-             color = c, textcolor = color.white, size = size.small, tooltip = tip)
+        string rr = str.tostring(plannedR, "#.#") + "R"
+        if take
+            // Trade taken: one label with side, probability, R:R and entry, plus target/stop boxes
+            label.new(bar_index, dir == 1 ? low : high,
+                 (dir == 1 ? "BUY " : "SELL ") + str.tostring(p, "#") + "% · " + rr + "\n@ " + str.tostring(close, format.mintick),
+                 style = dir == 1 ? label.style_label_up : label.style_label_down,
+                 color = dir == 1 ? color.new(color.teal, 0) : color.new(color.red, 0),
+                 textcolor = color.white, size = size.small, tooltip = tip)
+            if showBoxes
+                tpBox := box.new(bar_index, math.max(close, tgt), bar_index + 1, math.min(close, tgt),
+                     border_color = color.new(color.green, 50), bgcolor = color.new(color.green, 82),
+                     text = "TP " + str.tostring(tgt, format.mintick) + " · " + rr, text_size = size.tiny,
+                     text_color = color.new(color.lime, 0), text_halign = text.align_right,
+                     text_valign = dir == 1 ? text.align_top : text.align_bottom)
+                slBox := box.new(bar_index, math.max(close, stp), bar_index + 1, math.min(close, stp),
+                     border_color = color.new(color.red, 50), bgcolor = color.new(color.red, 82),
+                     text = "SL " + str.tostring(stp, format.mintick), text_size = size.tiny,
+                     text_color = color.new(color.red, 0), text_halign = text.align_right,
+                     text_valign = dir == 1 ? text.align_bottom : text.align_top)
+                entryLine := line.new(bar_index, close, bar_index + 1, close, color = color.new(color.white, 30), width = 1)
+        else if probStyle == "Labels"
+            label.new(bar_index, dir == 1 ? low : high, head + str.tostring(p, "#") + "%",
+                 style = dir == 1 ? label.style_label_up : label.style_label_down,
+                 color = color.new(color.gray, 30), textcolor = color.white, size = size.tiny, tooltip = tip)
+        else if probStyle == "Small dots"
+            label.new(bar_index, dir == 1 ? low : high, "",
+                 yloc = dir == 1 ? yloc.belowbar : yloc.abovebar,
+                 style = dir == 1 ? label.style_triangleup : label.style_triangledown,
+                 color = color.new(color.gray, 40), size = size.tiny,
+                 tooltip = head + str.tostring(p, "#") + "% · " + rr + "\n" + tip)
 
         // Phone / app alert: create an alert on this strategy with "alert() function calls only"
         if take or alertAll
@@ -285,43 +346,64 @@ if inWindow and inSess and bar_index > profBars + 5
                  " stop " + str.tostring(stp, format.mintick) + " target " + str.tostring(tgt, format.mintick) +
                  " (" + str.tostring(plannedR, "#.##") + "R)" + (take ? "" : " | not taken: " + why), alert.freq_once_per_bar_close)
 
-// Show target line for the open trade
-plot(strategy.position_size != 0 ? openTgt : na, "Open target", color = color.new(color.aqua, 0), style = plot.style_linebr)
-
 // ───────────────────────── Visuals ─────────────────────────
 bgcolor(showTrend and inWindow ? (htfTrend == 1 ? color.new(color.green, 94) : htfTrend == -1 ? color.new(color.red, 94) : na) : na, title = "15m structure")
 bgcolor(inWindow and not inWindow[1] ? color.new(color.yellow, 60) : na, title = "Window start")
 
-var array<box> zoneBoxes = array.new<box>()
+// Current HVN zones (last 2h): green = support below price, red = resistance above, orange = price inside.
+// Dotted line = zone midpoint (the trade target). Label = price range and share of the 2h volume.
+var array<box>   zoneBoxes = array.new<box>()
+var array<line>  zoneMids  = array.new<line>()
+var array<label> zoneLbls  = array.new<label>()
 if barstate.islast and showZones
     for bx in zoneBoxes
         box.delete(bx)
+    for ln in zoneMids
+        line.delete(ln)
+    for lb in zoneLbls
+        label.delete(lb)
     array.clear(zoneBoxes)
-    [lt, lb] = f_zones(0, profBars, rows, hvnMult)
-    int zn = array.size(lt)
+    array.clear(zoneMids)
+    array.clear(zoneLbls)
+    [zt, zb, zvol] = f_zones(0, profBars, rows, hvnMult)
+    int zn = array.size(zt)
     if zn > 0
+        float totV = 0.0
+        for i = 0 to profBars - 1
+            totV += nz(volume[i])
         for k = 0 to zn - 1
-            array.push(zoneBoxes, box.new(bar_index - profBars, array.get(lt, k), bar_index + 10, array.get(lb, k),
-                 border_color = color.new(color.orange, 30), bgcolor = color.new(color.orange, 85)))
+            float top = array.get(zt, k)
+            float bot = array.get(zb, k)
+            float mid = (top + bot) / 2
+            bool  above  = bot > close
+            bool  below  = top < close
+            color zc     = above ? color.red : below ? color.teal : color.orange
+            string role  = above ? "Resistance" : below ? "Support" : "Price inside"
+            string pct   = totV > 0 ? str.tostring(100.0 * array.get(zvol, k) / totV, "#") + "% vol" : ""
+            array.push(zoneBoxes, box.new(bar_index - profBars, top, bar_index + 8, bot,
+                 border_color = color.new(zc, 55), border_style = line.style_dashed, bgcolor = color.new(zc, 92)))
+            array.push(zoneMids, line.new(bar_index - profBars, mid, bar_index + 8, mid,
+                 color = color.new(zc, 45), style = line.style_dotted, width = 1))
+            array.push(zoneLbls, label.new(bar_index + 9, mid,
+                 "HVN " + role + "  " + str.tostring(bot, format.mintick) + " – " + str.tostring(top, format.mintick) + "  ·  " + pct,
+                 style = label.style_label_left, color = color.new(zc, 75), textcolor = color.white, size = size.small))
 
-var table tb = table.new(position.top_right, 2, 9, bgcolor = color.new(color.black, 15), border_width = 1)
-if barstate.islast
-    color w = color.white
-    table.cell(tb, 0, 0, "HVN Breakout Scanner", text_color = w)
-    table.cell(tb, 1, 0, timeframe.period == "1" ? "1m ✓" : "⚠ switch chart to 1m", text_color = timeframe.period == "1" ? color.lime : color.orange)
-    table.cell(tb, 0, 1, "Window", text_color = w)
-    table.cell(tb, 1, 1, "last " + str.tostring(simHours) + "h" + (sessMode == "All hours" ? "" : ", NY session only"), text_color = w)
-    table.cell(tb, 0, 2, "Trades taken", text_color = w)
-    table.cell(tb, 1, 2, str.tostring(trades), text_color = w)
-    table.cell(tb, 0, 3, "Wins / Losses", text_color = w)
-    table.cell(tb, 1, 3, str.tostring(wins) + " / " + str.tostring(losses), text_color = w)
-    table.cell(tb, 0, 4, "Win rate", text_color = w)
-    table.cell(tb, 1, 4, trades > 0 ? str.tostring(100.0 * wins / trades, "#.#") + "%" : "–", text_color = w)
-    table.cell(tb, 0, 5, "TOTAL R", text_color = w)
-    table.cell(tb, 1, 5, (netR >= 0 ? "+" : "") + str.tostring(netR, "#.##") + "R", text_color = netR >= 0 ? color.lime : color.red)
-    table.cell(tb, 0, 6, "Avg R / trade", text_color = w)
-    table.cell(tb, 1, 6, trades > 0 ? str.tostring(netR / trades, "#.##") + "R" : "–", text_color = w)
-    table.cell(tb, 0, 7, "Probability-only signals", text_color = w)
-    table.cell(tb, 1, 7, str.tostring(probOnly), text_color = w)
-    table.cell(tb, 0, 8, "Open trade", text_color = w)
-    table.cell(tb, 1, 8, strategy.position_size != 0 ? openSide + " (not counted)" : "none", text_color = w)
+string tblPos = tblPosIn == "Top right" ? position.top_right : tblPosIn == "Bottom left" ? position.bottom_left : position.bottom_right
+var table tb = table.new(tblPos, 2, 6, bgcolor = color.new(color.black, 30), border_width = 0)
+if barstate.islast and tblPosIn != "Hidden"
+    color w  = color.new(color.white, 10)
+    color dm = color.new(color.gray, 0)
+    size  ts = size.small
+    bool  ok = timeframe.period == "1"
+    table.cell(tb, 0, 0, "HVN Breakout · " + str.tostring(simHours) + "h", text_color = w, text_size = ts, text_halign = text.align_left)
+    table.cell(tb, 1, 0, ok ? "1m" : "switch to 1m", text_color = ok ? dm : color.orange, text_size = ts)
+    table.cell(tb, 0, 1, "Trades  W / L", text_color = dm, text_size = ts, text_halign = text.align_left)
+    table.cell(tb, 1, 1, str.tostring(trades) + "  " + str.tostring(wins) + " / " + str.tostring(losses), text_color = w, text_size = ts)
+    table.cell(tb, 0, 2, "Win rate", text_color = dm, text_size = ts, text_halign = text.align_left)
+    table.cell(tb, 1, 2, trades > 0 ? str.tostring(100.0 * wins / trades, "#") + "%" : "–", text_color = w, text_size = ts)
+    table.cell(tb, 0, 3, "Total R  (avg)", text_color = dm, text_size = ts, text_halign = text.align_left)
+    table.cell(tb, 1, 3, (netR >= 0 ? "+" : "") + str.tostring(netR, "#.#") + "R  (" + (trades > 0 ? str.tostring(netR / trades, "#.##") : "–") + ")", text_color = netR >= 0 ? color.lime : color.red, text_size = ts)
+    table.cell(tb, 0, 4, "Not-taken signals", text_color = dm, text_size = ts, text_halign = text.align_left)
+    table.cell(tb, 1, 4, str.tostring(probOnly), text_color = w, text_size = ts)
+    table.cell(tb, 0, 5, "Open trade", text_color = dm, text_size = ts, text_halign = text.align_left)
+    table.cell(tb, 1, 5, strategy.position_size != 0 ? openSide : "none", text_color = w, text_size = ts)
