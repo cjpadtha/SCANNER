@@ -22,7 +22,7 @@ strategy("HVN Breakout Scanner (BTC 1m)", shorttitle = "HVN Breakout", overlay =
 // ───────────────────────── Inputs ─────────────────────────
 grpW      = "Simulation window"
 simHours  = input.int(24, "Simulate the last N hours", minval = 1, maxval = 240, group = grpW)
-sessMode  = input.string("All hours", "Only signal during", options = ["All hours", "NY RTH (09:30-16:00 ET)", "NY AM killzone (09:30-11:00 ET)"], group = grpW)
+sessMode  = input.string("London (03:00-09:00 ET)", "Only signal during", options = ["All hours", "London (03:00-09:00 ET)", "NY RTH (09:30-16:00 ET)", "NY AM killzone (09:30-11:00 ET)"], group = grpW)
 
 grpV      = "HVN zones (volume profile)"
 profBars  = input.int(120, "Profile lookback in bars (120 = 2h on 1m)", minval = 20, maxval = 600, group = grpV)
@@ -36,6 +36,7 @@ atrLen    = input.int(14, "ATR length", minval = 1, group = grpB)
 stopMode  = input.string("Candle 1", "Stop placement", options = ["Candle 1", "Zone midpoint", "Zone far edge"], group = grpB)
 fallbackR = input.float(2.0, "Target R when there is no next HVN", minval = 0.5, step = 0.5, group = grpB)
 needTrend = input.bool(false, "Only auto-take big breakouts that agree with 15m structure", group = grpB)
+noTrap    = input.bool(true, "Skip trap-sweep breakouts (candle swept a level and closed back)", group = grpB)
 minProb   = input.float(0, "Only auto-take if score ≥ (0 = off)", minval = 0, maxval = 95, step = 5, group = grpB)
 minTgtPct = input.float(0.0, "Skip trades whose target is closer than x% (0 = off; fees are ~0.2% round trip)", minval = 0, step = 0.1, group = grpB)
 stopBuf   = input.float(0.0, "Extra stop buffer (x ATR beyond the stop level)", minval = 0, step = 0.25, group = grpB)
@@ -58,7 +59,7 @@ fvgMinAtr = input.float(0.0, "Minimum FVG size (x ATR)", minval = 0.0, step = 0.
 
 grpP      = "Score weights (points, not a probability — see the stats table for real win rates)"
 wBase     = input.float(50, "Base", group = grpP)
-wTrend    = input.float(15, "15m structure with (+) / against (−)", group = grpP)
+wTrend    = input.float(0, "15m structure with (+) / against (−)  [0: research shows 'with' does worse]", group = grpP)
 wFvg      = input.float(10, "FVG in breakout direction (+)", group = grpP)
 wSweep    = input.float(10, "Opposite-side sweep before breakout (+)", group = grpP)
 wTrap     = input.float(20, "Breakout candle swept a level and closed back (−)", group = grpP)
@@ -194,6 +195,7 @@ inWindow = time >= timenow - simHours * 3600000
 
 string TZ = "America/New_York"
 bool inSess = sessMode == "All hours" ? true :
+     sessMode == "London (03:00-09:00 ET)" ? not na(time(timeframe.period, "0300-0900", TZ)) :
      sessMode == "NY RTH (09:30-16:00 ET)" ? not na(time(timeframe.period, "0930-1600", TZ)) :
      not na(time(timeframe.period, "0930-1100", TZ))
 
@@ -455,11 +457,12 @@ if inWindow and inSess and bar_index > profBars + 5
         bool edgeOk   = not needEdge or (bn >= minN and histR > 0)
 
         bool flat  = strategy.position_size == 0
-        bool take  = big and risk > 0 and stopOk and flat and (not needTrend or trendWith) and probOk and distOk and edgeOk
+        bool take  = big and risk > 0 and stopOk and flat and (not needTrend or trendWith) and probOk and distOk and edgeOk and not (noTrap and trap)
         string why = not big ? "not a big breakout" : not flat ? "already in a trade" : (risk <= 0 or not stopOk) ? "invalid stop" :
              (needTrend and not trendWith) ? "against 15m structure" : not probOk ? "score below minimum" :
              not distOk ? "target only " + str.tostring(tgtPct, "#.##") + "% away" :
-             not edgeOk ? (bn < minN ? "not enough history for this score band" : "this score band has lost money so far") : ""
+             not edgeOk ? (bn < minN ? "not enough history for this score band" : "this score band has lost money so far") :
+             (noTrap and trap) ? "trap sweep" : ""
 
         // Follow this signal to see what really happens
         if risk > 0 and stopOk
