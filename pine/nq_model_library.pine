@@ -38,6 +38,9 @@ string M9  = "#9 SWEEP · order flow"
 string M10 = "#10 ORB30 · daily trend"
 model    = input.string(M0, "Model to trade", options = [M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10])
 simDays  = input.int(30, "Simulate the last N days", minval = 1, maxval = 120)
+riskUsd  = input.float(500, "Risk per trade ($) — contracts = risk ÷ (stop points × point value)", minval = 50, step = 50,
+     tooltip = "Topstep 50K research: $500 ≈ 54% pass / 34% blown over 2026 starts (typically 4–8 weeks). $300 = fewer blow-ups, slower. 3-day passes aren't realistic with this model.")
+maxQty   = input.int(50, "Max contracts (Topstep 50K: 50 micros)", minval = 1)
 grpD     = "Display (keep it clean)"
 showOR   = input.bool(true, "Today's 15-min opening range", group = grpD)
 showVW   = input.bool(true, "Today's VWAP", group = grpD)
@@ -338,7 +341,9 @@ bool showPos = input.bool(true, "Position boxes (TP green, SL red, entry line, r
 bool canTrade = inWindow and strategy.position_size == 0 and not (mSetup == "FIRST" and tradedToday) and (d == 1 ? stp < close : stp > close)
 if d != 0 and canTrade
     string id = d == 1 ? "L" : "S"
-    strategy.entry(id, d == 1 ? strategy.long : strategy.short, comment = "")
+    float stopPts = math.abs(close - stp)
+    int qty = int(math.max(1, math.min(maxQty, math.floor(riskUsd / (stopPts * syminfo.pointvalue)))))
+    strategy.entry(id, d == 1 ? strategy.long : strategy.short, qty = qty, comment = "")
     if na(tgt)
         strategy.exit(id + "X", id, stop = stp)
     else
