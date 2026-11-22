@@ -4,7 +4,8 @@
 //   Daily trend = prior daily close vs its 20-day EMA. Only when DOWN:
 //   previous 1h candle closed UP (against the trend), this 1h candle closes DOWN → SHORT at this close.
 //   Stop = highest high of the two candles (skip if the stop is closer than 0.4% of price). Target = 2R. Time exit after 48 hours.
-// Exit: 2R target; once +1R, stop moves to just past entry (input). Tested: ~2 trades/day, 54% won, ≈ +0.065R/trade after costs, both halves positive, max 7 losses in a row.
+// Entry filter: the down candle must be solid — body more than half its high-low range.
+// Exit: 2R target; once +0.5R, stop moves to just past entry. Tested: ~1.2 trades/day, 69% won, ≈ +0.052R/trade after costs, both halves positive.
 // Chart: BINANCE:BTCUSDT (or COINBASE:BTCUSD), 1-hour. Simulation only — no real orders.
 strategy("Vest $10 model (BTC 1h)", shorttitle = "Vest10", overlay = true, process_orders_on_close = true, pyramiding = 0,
      initial_capital = 500, default_qty_type = strategy.fixed, default_qty_value = 0.01,
@@ -13,11 +14,12 @@ riskUsd  = input.float(2.0, "Risk per trade ($)", minval = 0.5, step = 0.5)
 allowLong = input.bool(false, "Also take longs when the daily trend is UP (untested — off)")
 minStop  = input.float(0.4, "Minimum stop distance (% of price)", step = 0.1)
 rr       = input.float(2.0, "Target (R)", step = 0.5)
-beAt     = input.float(1.0, "Move stop to entry once the trade reaches +x R (0 = off)", minval = 0, step = 0.5,
-     tooltip = "Tested: +1R → 54% won, +0.065R/trade, max 7 losses in a row. +0.5R → 69% won, +0.029R/trade, max 5 in a row. Off → 38% won, +0.08R, max 16.")
+needBody = input.bool(true, "Only solid down candles (body > half the range)", tooltip = "Tested with +0.5R: 69% won, +0.052R/trade (halves +0.021 / +0.092). Without it: 69% won, +0.029R.")
+beAt     = input.float(0.5, "Move stop to entry once the trade reaches +x R (0 = off)", minval = 0, step = 0.5,
+     tooltip = "With the solid-candle filter: +0.5R → 69% won, +0.052R/trade; +1R → 53% won, +0.076R. Off → ~38% won.")
 
 int dTrend = request.security(syminfo.tickerid, "D", close[1] < ta.ema(close, 20)[1] ? -1 : 1, lookahead = barmerge.lookahead_on)
-bool shortSig = dTrend == -1 and close[1] > open[1] and close < open
+bool shortSig = dTrend == -1 and close[1] > open[1] and close < open and (not needBody or (open - close) > 0.5 * (high - low))
 bool longSig  = allowLong and dTrend == 1 and close[1] < open[1] and close > open
 float stS = math.max(high, high[1])
 float stL = math.min(low, low[1])
