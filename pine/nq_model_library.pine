@@ -36,10 +36,15 @@ string M9  = "#9 SWEEP · order flow"
 string M10 = "#10 ORB30 · daily trend"
 model    = input.string(M0, "Model to trade", options = [M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10])
 simDays  = input.int(30, "Simulate the last N days", minval = 1, maxval = 120)
-showLvls = input.bool(true, "Draw levels (opening range, overnight, prior day, VWAP)")
-showAll  = input.bool(true, "Mark other models' signals with small dots")
-showTbl  = input.bool(true, "Show the ranking table")
-tblPos   = input.string("Top right", "Table position", options = ["Top right", "Bottom right", "Bottom left", "Top left"])
+grpD     = "Display (keep it clean)"
+showOR   = input.bool(true, "Today's 15-min opening range", group = grpD)
+showVW   = input.bool(true, "Today's VWAP", group = grpD)
+showON   = input.bool(false, "Overnight high / low", group = grpD)
+showPD   = input.bool(false, "Prior day high / low", group = grpD)
+showOR30 = input.bool(false, "30-min opening range", group = grpD)
+showAll  = input.bool(false, "Dots for other models' signals", group = grpD)
+showTbl  = input.string("Compact", "Info box", options = ["Compact", "Full ranking", "Hidden"], group = grpD)
+tblPos   = input.string("Bottom right", "Info box position", options = ["Top right", "Bottom right", "Bottom left", "Top left"], group = grpD)
 
 string TZ = "America/New_York"
 int mn = hour(time, TZ) * 60 + minute(time, TZ)                   // bar OPEN time in minutes after midnight ET
@@ -230,7 +235,7 @@ else if firstLike and sigIMOM != 0 and f_pass(mFilt, sigIMOM)
 bool canTrade = inWindow and strategy.position_size == 0 and not (mSetup == "FIRST" and tradedToday) and (d == 1 ? stp < close : stp > close)
 if d != 0 and canTrade
     string id = d == 1 ? "L" : "S"
-    strategy.entry(id, d == 1 ? strategy.long : strategy.short, comment = why)
+    strategy.entry(id, d == 1 ? strategy.long : strategy.short, comment = "")
     if na(tgt)
         strategy.exit(id + "X", id, stop = stp)
     else
@@ -241,15 +246,15 @@ if d != 0 and canTrade
         tradedA := true
     float rr = na(tgt) ? na : math.abs(tgt - close) / math.abs(close - stp)
     label.new(bar_index, d == 1 ? low : high,
-         (d == 1 ? "BUY " : "SELL ") + why + (na(rr) ? " → hold to close" : " " + str.tostring(rr, "#.#") + "R"),
+         (d == 1 ? "BUY " : "SELL ") + why,
          style = d == 1 ? label.style_label_up : label.style_label_down,
-         color = d == 1 ? color.new(color.teal, 0) : color.new(color.red, 0), textcolor = color.white, size = size.small,
+         color = d == 1 ? color.new(color.teal, 10) : color.new(color.red, 10), textcolor = color.white, size = size.tiny,
          tooltip = model + "\nEntry " + str.tostring(close, format.mintick) + "\nStop " + str.tostring(stp, format.mintick) +
          (na(tgt) ? "\nTarget: none, exit 15:55" : "\nTarget " + str.tostring(tgt, format.mintick)) +
          "\nDaily trend " + (dTrend == 1 ? "up" : "down") + " · 15m " + (s15 == 1 ? "up" : s15 == -1 ? "down" : "flat") +
          " · VWAP " + ((close - vwap) * d > 0 ? "with" : "against") + " · flow " + str.tostring(flow30 * d, "#.##"))
 if strategy.position_size != 0 and isRth and mn >= 955
-    strategy.close_all(comment = "15:55 flat")
+    strategy.close_all(comment = "")
 
 // other models' raw signals as small dots (grey = filtered out for the selected model)
 if showAll and inWindow
@@ -263,48 +268,82 @@ if showAll and inWindow
         label.new(bar_index, sigORB30 == 1 ? low : high, "", yloc = sigORB30 == 1 ? yloc.belowbar : yloc.abovebar,
              style = sigORB30 == 1 ? label.style_triangleup : label.style_triangledown, color = color.new(color.yellow, 40), size = size.tiny, tooltip = "ORB30 signal (not traded by this model)")
 
-// ───────────────────────── Levels ─────────────────────────
-plot(showLvls and isRth ? vwap : na, "Session VWAP", color = color.new(color.aqua, 20), style = plot.style_linebr)
-plot(showLvls and isRth and mn >= 585 ? or15H : na, "OR15 high", color = color.new(color.orange, 30), style = plot.style_linebr)
-plot(showLvls and isRth and mn >= 585 ? or15L : na, "OR15 low", color = color.new(color.orange, 30), style = plot.style_linebr)
-plot(showLvls and isRth and mn >= 600 ? or30H : na, "OR30 high", color = color.new(color.yellow, 50), style = plot.style_linebr)
-plot(showLvls and isRth and mn >= 600 ? or30L : na, "OR30 low", color = color.new(color.yellow, 50), style = plot.style_linebr)
-plot(showLvls and isRth ? onH : na, "Overnight high", color = color.new(color.purple, 30), style = plot.style_linebr)
-plot(showLvls and isRth ? onL : na, "Overnight low", color = color.new(color.purple, 30), style = plot.style_linebr)
-plot(showLvls and isRth ? pdH : na, "Prior day high", color = color.new(color.gray, 30), style = plot.style_linebr)
-plot(showLvls and isRth ? pdL : na, "Prior day low", color = color.new(color.gray, 30), style = plot.style_linebr)
-bgcolor(isRth and inWindow ? (dTrend == 1 ? color.new(color.green, 95) : color.new(color.red, 95)) : na, title = "Daily trend")
+// ───────────────────────── Levels (latest session only, redrawn on the last bar; no price-scale labels) ─────────────────────────
+var int sesBar = na
+var array<chart.point> vwPts = array.new<chart.point>()
+if rthStart
+    sesBar := bar_index
+    array.clear(vwPts)
+if isRth
+    array.push(vwPts, chart.point.from_index(bar_index, vwap))
+var array<line> lvLines = array.new<line>()
+var array<label> lvLabels = array.new<label>()
+var polyline vwLine = na
+f_level(float y, int x1, string txt, color col, int w) =>
+    if not na(y) and not na(x1)
+        array.push(lvLines, line.new(x1, y, bar_index + 3, y, color = col, width = w))
+        array.push(lvLabels, label.new(bar_index + 3, y, txt, style = label.style_label_left, color = color.new(color.black, 100), textcolor = col, size = size.tiny))
+if barstate.islastconfirmedhistory or barstate.isrealtime
+    for l in lvLines
+        line.delete(l)
+    for lb in lvLabels
+        label.delete(lb)
+    array.clear(lvLines)
+    array.clear(lvLabels)
+    polyline.delete(vwLine)
+    if showVW and array.size(vwPts) > 1
+        vwLine := polyline.new(vwPts, line_color = color.new(color.aqua, 30), line_width = 1)
+    if showOR
+        f_level(or15H, sesBar, "OR15 high", color.orange, 2)
+        f_level(or15L, sesBar, "OR15 low", color.orange, 2)
+    if showOR30
+        f_level(or30H, sesBar, "OR30 high", color.new(color.yellow, 30), 1)
+        f_level(or30L, sesBar, "OR30 low", color.new(color.yellow, 30), 1)
+    if showON
+        f_level(onH, sesBar, "Overnight high", color.new(color.purple, 20), 1)
+        f_level(onL, sesBar, "Overnight low", color.new(color.purple, 20), 1)
+    if showPD
+        f_level(pdH, sesBar, "Prior day high", color.new(color.gray, 20), 1)
+        f_level(pdL, sesBar, "Prior day low", color.new(color.gray, 20), 1)
 
-// ───────────────────────── Ranking table (numbers from the vault, Jan 2023 – Nov 20, 2026, after MNQ costs) ─────────────────────────
+// ───────────────────────── Info box (numbers from the vault, Jan 2023 – Nov 20, 2026, after MNQ costs) ─────────────────────────
 bool atLastBar = barstate.islastconfirmedhistory or barstate.isrealtime
 string tp = tblPos == "Top right" ? position.top_right : tblPos == "Bottom right" ? position.bottom_right : tblPos == "Bottom left" ? position.bottom_left : position.top_left
-var table tb = table.new(tp, 6, 14, bgcolor = color.new(color.black, 25), border_width = 0)
+var table tb = table.new(tp, 5, 14, bgcolor = color.new(#131722, 10), frame_color = color.new(color.gray, 70), frame_width = 1, border_width = 0)
 f_cell(int c, int r, string s, color col) =>
-    table.cell(tb, c, r, s, text_color = col, text_size = size.tiny, text_halign = c == 0 ? text.align_left : text.align_center)
-if atLastBar and showTbl
-    color w = color.white
-    color g = color.gray
-    f_cell(0, 0, "NQ models (vault ranking)", color.orange)
-    f_cell(1, 0, "trades", g)
-    f_cell(2, 0, "won", g)
-    f_cell(3, 0, "avg R", g)
-    f_cell(4, 0, "yrs +", g)
-    f_cell(5, 0, "last 4 wk", g)
-    names = array.from(M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10)
-    ns  = array.from("565", "538", "270", "218", "162", "590", "427", "582", "326", "164", "267")
-    ws  = array.from("48%", "47%", "49%", "48%", "52%", "45%", "44%", "46%", "47%", "46%", "36%")
-    avs = array.from("+0.08", "+0.07", "+0.14", "+0.16", "+0.21", "+0.04", "+0.05", "+0.03", "+0.06", "+0.11", "+0.03")
-    ys  = array.from("3/4", "3/4", "4/4", "4/4", "4/4", "3/4", "3/4", "2/4", "3/4", "3/4", "2/4")
-    l4  = array.from("+7.9R", "+6.4R", "+2.5R", "-1.5R", "+3.5R", "-2.0R", "-0.4R", "-4.7R", "-3.9R", "-1.8R", "+9.3R")
+    table.cell(tb, c, r, s, text_color = col, text_size = size.small, text_halign = c == 0 ? text.align_left : text.align_right)
+names = array.from(M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10)
+avs = array.from("+0.08R", "+0.07R", "+0.14R", "+0.16R", "+0.21R", "+0.04R", "+0.05R", "+0.03R", "+0.06R", "+0.11R", "+0.03R")
+ws  = array.from("48%", "47%", "49%", "48%", "52%", "45%", "44%", "46%", "47%", "46%", "36%")
+l4  = array.from("+7.9R", "+6.4R", "+2.5R", "-1.5R", "+3.5R", "-2.0R", "-0.4R", "-4.7R", "-3.9R", "-1.8R", "+9.3R")
+int sel = array.indexof(names, model)
+color W = color.white
+color G = color.new(color.gray, 20)
+string ctxDaily = dTrend == 1 ? "UP" : "DOWN"
+string ctx15 = s15 == 1 ? "UP" : s15 == -1 ? "DOWN" : "FLAT"
+bool aligned = (dTrend == 1 and s15 == 1) or (dTrend == -1 and s15 == -1)
+if atLastBar and showTbl == "Compact"
+    f_cell(0, 0, model, color.orange)
+    f_cell(0, 1, "Avg per trade / won", G)
+    f_cell(1, 1, array.get(avs, sel) + "  " + array.get(ws, sel), W)
+    f_cell(0, 2, "Last 4 weeks", G)
+    f_cell(1, 2, array.get(l4, sel), str.startswith(array.get(l4, sel), "-") ? color.red : color.lime)
+    f_cell(0, 3, "Daily trend", G)
+    f_cell(1, 3, ctxDaily, dTrend == 1 ? color.lime : color.red)
+    f_cell(0, 4, "15-min structure", G)
+    f_cell(1, 4, ctx15, s15 == 1 ? color.lime : s15 == -1 ? color.red : G)
+    f_cell(0, 5, "Today's bias", G)
+    f_cell(1, 5, aligned ? (dTrend == 1 ? "LONGS ONLY (aligned)" : "SHORTS ONLY (aligned)") : "Mixed: ORB15 off", aligned ? color.orange : G)
+    f_cell(0, 6, "Price vs VWAP", G)
+    f_cell(1, 6, close > vwap ? "above" : "below", W)
+if atLastBar and showTbl == "Full ranking"
+    f_cell(0, 0, "Model", G)
+    f_cell(1, 0, "avg R", G)
+    f_cell(2, 0, "won", G)
+    f_cell(3, 0, "4 wk", G)
     for i = 0 to 10
-        string nm = array.get(names, i)
-        color c = nm == model ? color.lime : w
-        f_cell(0, i + 1, (nm == model ? "▶ " : "") + nm, c)
-        f_cell(1, i + 1, array.get(ns, i), c)
+        color c = i == sel ? color.orange : W
+        f_cell(0, i + 1, array.get(names, i), c)
+        f_cell(1, i + 1, array.get(avs, i), c)
         f_cell(2, i + 1, array.get(ws, i), c)
-        f_cell(3, i + 1, array.get(avs, i), c)
-        f_cell(4, i + 1, array.get(ys, i), c)
-        f_cell(5, i + 1, array.get(l4, i), str.startswith(array.get(l4, i), "-") ? color.red : color.lime)
-    f_cell(0, 12, "Now: daily " + (dTrend == 1 ? "UP" : "DOWN") + " · 15m " + (s15 == 1 ? "UP" : s15 == -1 ? "DOWN" : "flat") +
-         " · " + (close > vwap ? "above" : "below") + " VWAP · flow " + str.tostring(flow30, "#.##"), color.orange)
-    f_cell(0, 13, "No result is guaranteed. #10 replaces the vault's HVN+flow model (that one runs in the HVN script).", g)
+        f_cell(3, i + 1, array.get(l4, i), str.startswith(array.get(l4, i), "-") ? color.red : color.lime)
