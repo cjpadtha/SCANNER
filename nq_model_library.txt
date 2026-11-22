@@ -368,6 +368,9 @@ if d != 0 and canTrade
     if mSetup == "MAIN" and why == "ORB15" and f_pass("both", d)
         tradedA := true
     float rr = na(tgt) ? na : math.abs(tgt - close) / math.abs(close - stp)
+    alert('{"app":"MAIN","ev":"entry","setup":"' + why + '","side":"' + (d == 1 ? "long" : "short") + '","entry":' + str.tostring(close, format.mintick) +
+         ',"stop":' + str.tostring(stp, format.mintick) + ',"tp":' + (na(tgt) ? "null" : str.tostring(tgt, format.mintick)) + ',"qty":' + str.tostring(qty) +
+         ',"exit":"15:55","trend":' + str.tostring(dTrend) + ',"s15":' + str.tostring(s15) + ',"t":"' + str.format_time(time_close, "yyyy-MM-dd HH:mm", TZ) + '"}', alert.freq_once_per_bar_close)
     pEntry := close
     pRisk := math.abs(close - stp)
     pDir := d
@@ -394,7 +397,10 @@ if strategy.position_size != 0 and pTrail and not na(pSl) and bar_index > box.ge
     pBest := pDir == 1 ? math.max(pBest, high) : math.min(pBest, low)
     if (pBest - pEntry) * pDir >= pRisk
         float lvl = pBest - pDir * 2.0 * atr14
+        float prevStop = pStop
         pStop := pDir == 1 ? math.max(pStop, lvl) : math.min(pStop, lvl)
+        if pStop != prevStop
+            alert('{"app":"MAIN","ev":"move_stop","stop":' + str.tostring(pStop, format.mintick) + ',"t":"' + str.format_time(time_close, "yyyy-MM-dd HH:mm", TZ) + '"}', alert.freq_once_per_bar_close)
         strategy.exit(pDir == 1 ? "LX" : "SX", pDir == 1 ? "L" : "S", stop = pStop)
 
 // stretch the open trade's boxes; on exit, stop them at the exit bar and print the result in R
@@ -408,6 +414,7 @@ if strategy.closedtrades > lastClosed
     float ex = strategy.closedtrades.exit_price(j)
     int xb = strategy.closedtrades.exit_bar_index(j)
     float rRes = pRisk > 0 ? (ex - pEntry) * pDir / pRisk : 0.0
+    alert('{"app":"MAIN","ev":"exit","price":' + str.tostring(ex, format.mintick) + ',"R":' + str.tostring(rRes, "#.##") + ',"t":"' + str.format_time(time_close, "yyyy-MM-dd HH:mm", TZ) + '"}', alert.freq_once_per_bar_close)
     if showPos and not na(pSl)
         box.set_right(pSl, xb)
         if not na(pTp)
@@ -461,7 +468,8 @@ if useON and mSetup == "MAIN" and onStart and inWindow and strategy.position_siz
         pEn := line.new(bar_index, close, bar_index + 1, close, color = color.new(color.white, 20), width = 1)
     label.new(bar_index, low, "BUY ON", style = label.style_label_up, color = color.new(color.teal, 10), textcolor = color.white, size = size.tiny,
          tooltip = "★ MAIN ③ overnight leg\nEntry " + str.tostring(close, format.mintick) + "\nStop " + str.tostring(oStp, format.mintick) + "\nNo target: exit 09:25 ET\nToday's MAIN result " + str.tostring(dayR, "#.0") + "R")
-    alert("MAIN ③ overnight: LONG MNQ " + str.tostring(oQty) + " @ " + str.tostring(close, format.mintick) + " stop " + str.tostring(oStp, format.mintick) + " exit 09:25 ET", alert.freq_once_per_bar_close)
+    alert('{"app":"MAIN","ev":"entry","setup":"ON","side":"long","entry":' + str.tostring(close, format.mintick) + ',"stop":' + str.tostring(oStp, format.mintick) +
+         ',"tp":null,"qty":' + str.tostring(oQty) + ',"exit":"09:25","trend":1,"dayR":' + str.tostring(dayR, "#.##") + ',"t":"' + str.format_time(time_close, "yyyy-MM-dd HH:mm", TZ) + '"}', alert.freq_once_per_bar_close)
 if pIsON and strategy.position_size > 0 and mn >= 565 and mn < 960
     strategy.close("ON", comment = "")
 
