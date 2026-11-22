@@ -9,7 +9,7 @@
 //  ORB30  09:30-10:00 range; first 5m close beyond it before 11:30 → enter; stop = range midpoint; hold to the close
 //  SWEEP  price runs the overnight (18:00-09:30) high/low after the open, then a 5m candle closes back inside → fade; stop = sweep extreme; target 1.5R
 //  HVN    (secondary, only as a "first trade of the day" candidate) 2h HVN zone; candle 1 closes outside, candle 2 further out with a body
-//         >= 0.25 ATR, 09:30-11:00, no trap sweep → enter; stop beyond candle 1; trailing stop 2 ATR once +1R (vault's 4-year HVN version)
+//         >= 0.25 ATR, 09:30-11:00, no trap sweep, no opposite-side sweep in the last 30 bars → enter; stop beyond candle 1; trailing stop 2 ATR once +1R (vault's 4-year HVN version)
 //  IMOM   direction from yesterday's 16:00 close to 10:00 → enter at 15:30 in that direction; stop 0.25 x average daily range; exit at the close
 // Filters  daily trend (prior daily close vs 20-day EMA) · 15-minute structure · VWAP side (session VWAP from 09:30) · order flow (last 30 min of 1m candles)
 // ★ MAIN (Cole's main model) = up to 2 trades a day, one position at a time:
@@ -280,7 +280,9 @@ if isRth and mn < 660 and bar_index > 30
     if hd != 0
         bool bigC = hd == 1 ? close - open >= 0.25 * atr14 : open - close >= 0.25 * atr14
         bool trap = hd == 1 ? (not na(bearSwBar) and bar_index - bearSwBar <= 1) : (not na(bullSwBar) and bar_index - bullSwBar <= 1)
-        if bigC and not trap
+        // skip breakouts right after an opposite-side liquidity sweep (the usual fake-out; added to ★ MAIN 2026-11-22)
+        bool swBefore = hd == 1 ? (not na(bullSwBar) and bar_index - bullSwBar <= 30) : (not na(bearSwBar) and bar_index - bearSwBar <= 30)
+        if bigC and not trap and not swBefore
             sigHVN := hd
             stHVN := hd == 1 ? low[1] : high[1]
 
