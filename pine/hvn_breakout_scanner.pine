@@ -21,7 +21,7 @@ strategy("HVN Breakout Scanner (BTC 5m)", shorttitle = "HVN Breakout", overlay =
 
 // ───────────────────────── Inputs ─────────────────────────
 grpW      = "Simulation window"
-simHours  = input.int(24, "Simulate the last N hours", minval = 1, maxval = 240, group = grpW)
+simHours  = input.int(24, "Simulate the last N hours (168 = 1 week, 672 = 4 weeks)", minval = 1, maxval = 720, group = grpW)
 sessMode  = input.string("London (03:00-09:00 ET)", "Only signal during", options = ["All hours", "London (03:00-09:00 ET)", "NY RTH (09:30-16:00 ET)", "NY AM killzone (09:30-11:00 ET)"], group = grpW)
 
 grpV      = "HVN zones (volume profile)"
