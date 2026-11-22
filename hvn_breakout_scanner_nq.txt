@@ -19,7 +19,8 @@
 strategy("HVN Breakout Scanner (NQ 5m)", shorttitle = "HVN Breakout NQ", overlay = true, process_orders_on_close = true,
      max_bars_back = 1600, max_labels_count = 500, max_boxes_count = 300, max_lines_count = 300,
      initial_capital = 50000, default_qty_type = strategy.fixed, default_qty_value = 2,
-     commission_type = strategy.commission.cash_per_contract, commission_value = 0.5, slippage = 1, pyramiding = 0)
+     commission_type = strategy.commission.cash_per_contract, commission_value = 0.5, slippage = 1, pyramiding = 0,
+     margin_long = 5, margin_short = 5)   // futures margin: without this, 2 MNQ (~$100k of contract value) is rejected on a $50k account
 
 // ───────────────────────── Inputs ─────────────────────────
 grpW      = "Simulation window"
