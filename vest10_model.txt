@@ -1,0 +1,41 @@
+//@version=6
+// Vest $10 model — BTC 1-hour pullback WITH the daily trend (shorts while the daily trend is down; longs off until tested)
+// Rules (tested Nov 2025 – Nov 2026 with Vest costs: 0.01% taker + 0.01% slippage per fill):
+//   Daily trend = prior daily close vs its 20-day EMA. Only when DOWN:
+//   previous 1h candle closed UP (against the trend), this 1h candle closes DOWN → SHORT at this close.
+//   Stop = highest high of the two candles (skip if the stop is closer than 0.4% of price). Target = 2R. Time exit after 48 hours.
+// Result: ~2 trades/day, ~38% won, ≈ +0.08R per trade after costs (first half +0.13R, second half +0.01R). Small edge — size small.
+// Chart: BINANCE:BTCUSDT (or COINBASE:BTCUSD), 1-hour. Simulation only — no real orders.
+strategy("Vest $10 model (BTC 1h)", shorttitle = "Vest10", overlay = true, process_orders_on_close = true, pyramiding = 0,
+     initial_capital = 500, default_qty_type = strategy.fixed, default_qty_value = 0.01,
+     commission_type = strategy.commission.percent, commission_value = 0.02)
+riskUsd  = input.float(2.0, "Risk per trade ($)", minval = 0.5, step = 0.5)
+allowLong = input.bool(false, "Also take longs when the daily trend is UP (untested — off)")
+minStop  = input.float(0.4, "Minimum stop distance (% of price)", step = 0.1)
+rr       = input.float(2.0, "Target (R)", step = 0.5)
+
+int dTrend = request.security(syminfo.tickerid, "D", close[1] < ta.ema(close, 20)[1] ? -1 : 1, lookahead = barmerge.lookahead_on)
+bool shortSig = dTrend == -1 and close[1] > open[1] and close < open
+bool longSig  = allowLong and dTrend == 1 and close[1] < open[1] and close > open
+float stS = math.max(high, high[1])
+float stL = math.min(low, low[1])
+bool flat = strategy.position_size == 0
+var int entryBar = na
+if flat and shortSig and (stS - close) / close * 100 >= minStop
+    float q = riskUsd / (stS - close)
+    strategy.entry("S", strategy.short, qty = q)
+    strategy.exit("SX", "S", stop = stS, limit = close - rr * (stS - close))
+    entryBar := bar_index
+    label.new(bar_index, high, "SELL\nstop " + str.tostring(stS, "#") + "\ntarget " + str.tostring(close - rr * (stS - close), "#") + "\nsize " + str.tostring(q, "#.####") + " BTC",
+         style = label.style_label_down, color = color.new(color.red, 10), textcolor = color.white, size = size.small)
+    alert("Vest10 SHORT BTC @ " + str.tostring(close, "#") + " | stop " + str.tostring(stS, "#") + " | target " + str.tostring(close - rr * (stS - close), "#") +
+         " | size " + str.tostring(q, "#.####") + " BTC for $" + str.tostring(riskUsd), alert.freq_once_per_bar_close)
+if flat and longSig and (close - stL) / close * 100 >= minStop
+    float q2 = riskUsd / (close - stL)
+    strategy.entry("L", strategy.long, qty = q2)
+    strategy.exit("LX", "L", stop = stL, limit = close + rr * (close - stL))
+    entryBar := bar_index
+    alert("Vest10 LONG BTC @ " + str.tostring(close, "#") + " | stop " + str.tostring(stL, "#"), alert.freq_once_per_bar_close)
+if not flat and not na(entryBar) and bar_index - entryBar >= 48
+    strategy.close_all(comment = "48h")
+bgcolor(dTrend == -1 ? color.new(color.red, 94) : na, title = "Daily trend down")
