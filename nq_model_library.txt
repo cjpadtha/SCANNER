@@ -431,26 +431,26 @@ if strategy.closedtrades > lastClosed
     lastClosed := strategy.closedtrades
 
 // ───────────────────────── ★ MAIN ③ overnight leg (fallback) ─────────────────────────
-var float onHi = na
-var float onLo = na
-var array<float> onRngs = array.new_float()
-bool onStart = mn >= 1080 and mn[1] < 1080 and dayofweek(time, TZ) != dayofweek.friday
-bool onEnd = mn >= 565 and mn < 960
-if onStart
-    onHi := high
-    onLo := low
-else if not na(onHi) and not onEnd
-    onHi := math.max(onHi, high)
-    onLo := math.min(onLo, low)
-if onEnd and not na(onHi)
-    array.push(onRngs, onHi - onLo)
-    if array.size(onRngs) > 20
-        array.shift(onRngs)
-    onHi := na
-    onLo := na
-float onAvg = array.size(onRngs) >= 10 ? array.avg(onRngs) : na
-if useON and mSetup == "MAIN" and onStart and inWindow and strategy.position_size == 0 and dTrend == 1 and dayR <= 0 and not na(onAvg)
-    float oRisk = onK * onAvg
+var float legHi = na
+var float legLo = na
+var array<float> legRngs = array.new_float()
+bool legStart = mn >= 1080 and mn[1] < 1080 and dayofweek(time, TZ) != dayofweek.friday
+bool legEnd = mn >= 565 and mn < 960
+if legStart
+    legHi := high
+    legLo := low
+else if not na(legHi) and not legEnd
+    legHi := math.max(legHi, high)
+    legLo := math.min(legLo, low)
+if legEnd and not na(legHi)
+    array.push(legRngs, legHi - legLo)
+    if array.size(legRngs) > 20
+        array.shift(legRngs)
+    legHi := na
+    legLo := na
+float legAvg = array.size(legRngs) >= 10 ? array.avg(legRngs) : na
+if useON and mSetup == "MAIN" and legStart and inWindow and strategy.position_size == 0 and dTrend == 1 and dayR <= 0 and not na(legAvg)
+    float oRisk = onK * legAvg
     float oStp = close - oRisk
     int oQty = int(math.max(1, math.min(maxQty, math.floor(riskUsd / (oRisk * syminfo.pointvalue)))))
     strategy.entry("ON", strategy.long, qty = oQty, comment = "")
