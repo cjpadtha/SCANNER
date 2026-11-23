@@ -64,6 +64,12 @@ details summary { cursor:pointer; color:var(--muted); font-size:13px; } details[
 .tb { display:grid; grid-template-columns: auto 1fr 1fr auto; gap:6px 12px; align-items:center; font-size:13.5px; }
 .tb .h { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-weight:700; } .tb .tf { font-weight:700; }
 .tb .u { color:var(--up); font-weight:700; } .tb .d { color:var(--down); font-weight:700; } .tb .acc { font:500 12px var(--mono); color:var(--muted); }
+.grade { width:64px; height:64px; border-radius:16px; display:grid; place-items:center; font:800 34px var(--sans); background:var(--panel2); color:var(--muted); flex:none; }
+.grade.A { background:var(--up); color:#06140d; } .grade.B { background:var(--gold); color:#1a1300; } .grade.C { background:var(--panel2); color:var(--muted); }
+#setCard.down .grade.A { background:var(--down); color:#fff; }
+.reasons { display:flex; flex-wrap:wrap; gap:6px; } .reasons span { font-size:12px; font-weight:600; padding:4px 9px; border-radius:99px; background:var(--panel2); color:var(--muted); }
+.reasons span.on { background:var(--up-bg); color:var(--up); } .reasons span.key { background:var(--gold-bg); color:var(--gold); } .reasons span.neg { background:var(--down-bg); color:var(--down); }
+.chart.tall { height:300px; } .legend { display:flex; flex-wrap:wrap; gap:4px 12px; } .legend .sw { display:inline-block; width:10px; height:10px; border-radius:2px; opacity:.5; margin-right:4px; vertical-align:-1px; }
 .model .state { font-size:22px; font-weight:800; } .note { font-size:12.5px; color:var(--muted); line-height:1.55; }
 </style></head><body>
 <div class="wrap">
@@ -73,6 +79,37 @@ details summary { cursor:pointer; color:var(--muted); font-size:13px; } details[
     <div class="spacer"></div>
     <div class="timer"><div class="t num" id="left">--:--</div><div class="w" id="winLbl">15-min window</div></div>
   </header>
+
+  <section class="card call flat full" id="setCard" aria-live="polite">
+    <div class="card-h"><h2>Setup call · 5-min</h2><span class="chip" id="feedChip">order flow: connecting</span></div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div class="grade" id="gBadge">–</div>
+      <div style="min-width:0;flex:1"><div class="dir" id="sDir">Scanning…</div><div class="sub" id="sSub">Looking for absorption and liquidity sweeps on closed 5-minute bars.</div></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="k">Entry</div><div class="v" id="sEntry">—</div></div>
+      <div class="stat"><div class="k">Stop</div><div class="v bad" id="sStop">—</div></div>
+      <div class="stat"><div class="k">Target 1R / 2R</div><div class="v good" id="sTgt">—</div></div>
+      <div class="stat"><div class="k">Tested: right 15 min later</div><div class="v" id="sHit">—</div></div>
+      <div class="stat"><div class="k">Status</div><div class="v" id="sStat">—</div></div>
+      <div class="stat"><div class="k">Your live record</div><div class="v" id="sRec">—</div></div>
+    </div>
+    <div class="reasons" id="sWhy"></div>
+    <div class="row" style="flex-wrap:wrap"><button class="btn" id="notifyBtn">🔔 Alert me on A/B setups</button><span class="small muted" id="notifyTxt" style="align-self:center"></span></div>
+  </section>
+
+  <section class="card full">
+    <div class="card-h"><h2>Setups · 5-min chart</h2><span class="small muted" id="c5meta">last 6 h</span></div>
+    <svg class="chart tall" id="chart5" viewBox="0 0 600 300" preserveAspectRatio="none" role="img" aria-label="BTC 5-minute candles with setups, support, resistance, fair value gaps and the Asia range"></svg>
+    <div class="legend small muted">
+      <span><b class="good">A▲</b>/<b class="bad">B▼</b> setup (grade)</span><span><b style="color:var(--gold)">◆</b> absorption</span><span><b style="color:var(--blue)">✕</b> liquidity sweep</span>
+      <span><i class="sw" style="background:var(--up)"></i>support</span><span><i class="sw" style="background:var(--down)"></i>resistance</span><span><i class="sw" style="background:var(--blue)"></i>open FVG</span><span><i class="sw" style="background:var(--gold)"></i>Asia range (AMD)</span>
+    </div>
+    <details><summary>How the grades were built (4 years of BTC, 70,982 setups)</summary>
+      <div class="pats" id="factTbl"></div>
+      <p class="note">Grades were chosen on 2023–24 data only, then checked on 2025 and 2026, which the model had never seen. <b>A</b> = absorption at a liquidity sweep (heavy volume, aggressive sellers, but the bar closes in its upper half right after taking out a swing low; mirror for shorts): right 59% / 55% / 60% of the time 15 minutes later, about one every two days. <b>B</b> = absorption alone: 53–54%, about 2–3 a day. <b>C</b> = sweep, S/R or FVG without absorption: 50–52%, about a coin flip, so C is shown faint. What didn't help: FVG retests (≈50%, and worse when added to absorption), order flow pushing the same way as the trade (48%; the edge comes from absorbing that push), AMD bias and the 1h trend (≈51%). Trading the stop and targets with 4 bp exchange fees still lost about −0.15R per trade for grade A, because the stops are tight. Use the grade as a direction lean, for example the next Kalshi window, not as a fee-paying scalp. Alerts work only while this page is open.</p>
+    </details>
+  </section>
 
   <section class="card call flat" id="callCard" aria-live="polite">
     <div class="card-h"><h2>This 15-min window</h2><span class="chip" id="srcChip">strike: estimate</span></div>
@@ -362,6 +399,176 @@ function renderHourly() {
   $("hLast").textContent = new Date(sig.t).toLocaleString([], { weekday: "short", hour: "numeric" }); $("hEntry").textContent = fmt(sig.e, 0); $("hST").textContent = `${fmt(sn, 0)} / ${fmt(tgt, 0)}`; $("hBE").textContent = sn < sig.e ? "done" : fmt(be, 0);
   if (open && now - sig.t < 3600e3 && window._buzz !== sig.t) { window._buzz = sig.t; try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {} }
 }
+// ---------- 5-min setup engine (same rules as vault .scripts/btc_confluence.py; grades chosen on 2023–24, checked on 2025 and 2026)
+const GRADE = {
+  A: { name: "Absorption at a liquidity sweep", hit: [0.587, 0.552, 0.601], freq: "≈ 1 every 2 days" },
+  B: { name: "Absorption", hit: [0.531, 0.536, 0.528], freq: "≈ 2–3 a day" },
+  C: { name: "Sweep / S-R / FVG, no absorption", hit: [0.523, 0.504, 0.509], freq: "≈ 9 a day" } };
+const FACT = { // key: [label, right-15-min when present 2023-24 / 2025 / 2026, kind]
+  absorb: ["Absorption", [0.54, 0.538, 0.54], "key"], sweep: ["Liquidity sweep (ICT)", [0.525, 0.506, 0.514], "key"],
+  pd: ["Discount / premium (ICT)", [0.524, 0.511, 0.513], ""], amd: ["AMD bias (Asia sweep)", [0.516, 0.505, 0.509], ""],
+  sr: ["Support / resistance", [0.509, 0.503, 0.506], ""], trend: ["1h trend agrees", [0.513, 0.498, 0.504], ""],
+  fvg: ["FVG retest", [0.503, 0.497, 0.497], "neg"], flow: ["Order flow same way", [0.484, 0.487, 0.485], "neg"] };
+let B5 = [], feed = null, cbFlow = new Map(), cbSeen = new Set(), ENG = null;
+const B5MS = 300e3;
+async function loadB5() {
+  const now = Date.now(), parseBn = (j) => j.map(k => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], d: 2 * +k[9] - +k[5] })).filter(b => b.t + B5MS <= now);
+  for (const [nm, u] of [["Binance", "https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=1000"], ["Binance.US", "https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=1000"]]) {
+    try { const b = parseBn(await getJSON(u)); if (b.length > 300) { B5 = b; feed = nm; return; } } catch (e) {}
+  }
+  try { // fallback: Coinbase 5-min candles + taker flow from Coinbase trades collected while the page is open
+    const j = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=300");
+    B5 = j.map(c => ({ t: c[0] * 1e3, l: c[1], h: c[2], o: c[3], c: c[4], v: c[5] })).sort((a, b) => a.t - b.t).filter(b => b.t + B5MS <= now)
+      .map(b => { const f = cbFlow.get(b.t); return { ...b, d: f && f.full ? (f.tb - f.ts) / (f.tb + f.ts) * b.v : null }; });
+    feed = "Coinbase";
+  } catch (e) {}
+}
+async function pollCbTrades(pages = 1) { // Coinbase 'side' = maker side → taker buy when side is "sell"
+  if (feed && feed !== "Coinbase") return;
+  let after = null;
+  for (let p = 0; p < pages; p++) {
+    try {
+      const r = await fetch("https://api.exchange.coinbase.com/products/BTC-USD/trades?limit=1000" + (after ? "&after=" + after : ""), { cache: "no-store" }); if (!r.ok) return;
+      const tr = await r.json(); after = r.headers.get("cb-after"); if (!tr.length) return;
+      let oldest = Infinity;
+      for (const x of tr) { if (cbSeen.has(x.trade_id)) continue; cbSeen.add(x.trade_id); const t = Date.parse(x.time); oldest = Math.min(oldest, t);
+        const k = Math.floor(t / B5MS) * B5MS, f = cbFlow.get(k) || { tb: 0, ts: 0, from: Infinity, full: false }; if (x.side === "sell") f.tb += +x.size; else f.ts += +x.size; f.from = Math.min(f.from, t); cbFlow.set(k, f); }
+      for (const [k, f] of cbFlow) f.full = f.from <= k + 20e3 || cbFlow.has(k - B5MS);   // bar counted from (near) its start
+      if (!after || oldest < Date.now() - 75 * 60e3) break;
+    } catch (e) { return; }
+  }
+  if (cbSeen.size > 200000) cbSeen = new Set([...cbSeen].slice(-100000));
+}
+function runEngine(b) {
+  const n = b.length; if (n < 60) return null;
+  const H = b.map(x => x.h), L = b.map(x => x.l), C = b.map(x => x.c), V = b.map(x => x.v), D = b.map(x => x.d);
+  const atr = []; for (let i = 0; i < n; i++) { const tr = i ? Math.max(H[i] - L[i], Math.abs(H[i] - C[i - 1]), Math.abs(L[i] - C[i - 1])) : H[i] - L[i]; atr.push(i ? atr[i - 1] + (tr - atr[i - 1]) * 2 / 15 : tr); }
+  const eF = ema(C, 240), eS = ema(C, 600);
+  const isPH = j => j >= 2 && j + 2 < n && H[j] >= Math.max(H[j - 2], H[j - 1], H[j + 1], H[j + 2]);
+  const isPL = j => j >= 2 && j + 2 < n && L[j] <= Math.min(L[j - 2], L[j - 1], L[j + 1], L[j + 2]);
+  const PH = [], PL = []; for (let j = 0; j < n; j++) { if (isPH(j)) PH.push(j); if (isPL(j)) PL.push(j); }
+  // AMD: Asia range 00:00–07:00 UTC; a sweep beyond one side then a close back inside sets the day's bias the other way
+  const amd = new Array(n).fill(0); let day = null, aH = -Infinity, aL = Infinity, sL = false, sH = false, bias = 0, asia = null;
+  for (let i = 0; i < n; i++) { const d = new Date(b[i].t), dk = d.toISOString().slice(0, 10), hr = d.getUTCHours();
+    if (dk !== day) { day = dk; aH = -Infinity; aL = Infinity; sL = sH = false; bias = 0; }
+    if (hr < 7) { aH = Math.max(aH, H[i]); aL = Math.min(aL, L[i]); asia = { day: dk, hi: aH, lo: aL, t0: Date.parse(dk + "T00:00:00Z") }; continue; }
+    amd[i] = hr < 21 ? bias : 0;
+    if (L[i] < aL) sL = true; if (H[i] > aH) sH = true;
+    if (sL && C[i] > aL && L[i] <= aL * 1.002) { bias = 1; sL = false; } if (sH && C[i] < aH && H[i] >= aH * 0.998) { bias = -1; sH = false; } }
+  const sigs = [], sweeps = [], absorbs = [], last = { 1: -99, "-1": -99 };
+  const from = Math.max(50, n - 150);
+  for (let i = from; i < n; i++) {
+    const a = atr[i]; if (!(a > 0)) continue;
+    const hs = PH.filter(j => j >= i - 288 && j <= i - 3), ls = PL.filter(j => j >= i - 288 && j <= i - 3), tol = 0.25 * a;
+    const f = { 1: {}, "-1": {} };
+    if (ls.length && L[i] < L[ls[ls.length - 1]] && C[i] > L[ls[ls.length - 1]]) f[1].sweep = 1;
+    if (hs.length && H[i] > H[hs[hs.length - 1]] && C[i] < H[hs[hs.length - 1]]) f[-1].sweep = 1;
+    const lvS = ls.map(j => L[j]).filter((v, _, A) => A.filter(x => Math.abs(x - v) <= tol).length >= 2), lvR = hs.map(j => H[j]).filter((v, _, A) => A.filter(x => Math.abs(x - v) <= tol).length >= 2);
+    if (lvS.some(v => L[i] <= v + tol && C[i] > v)) f[1].sr = 1; if (lvR.some(v => H[i] >= v - tol && C[i] < v)) f[-1].sr = 1;
+    for (let k = i - 24; k < i - 1; k++) { if (k < 2) continue;
+      if (L[k] > H[k - 2] && L[i] <= L[k] && C[i] >= H[k - 2] && Math.min(Infinity, ...L.slice(k + 1, i)) > H[k - 2]) f[1].fvg = 1;
+      if (H[k] < L[k - 2] && H[i] >= H[k] && C[i] <= L[k - 2] && Math.max(-Infinity, ...H.slice(k + 1, i)) < L[k - 2]) f[-1].fvg = 1; }
+    const va = V.slice(Math.max(0, i - 48), i).reduce((s, x) => s + x, 0) / Math.min(48, i), rng = H[i] - L[i];
+    if (D[i] != null && V[i] > 1.8 * va && rng > 0) { const pos = (C[i] - L[i]) / rng;
+      if (D[i] < -0.1 * V[i] && pos > 0.5) f[1].absorb = 1; if (D[i] > 0.1 * V[i] && pos < 0.5) f[-1].absorb = 1; }
+    if (f[1].sweep || f[-1].sweep) sweeps.push({ i, s: f[1].sweep ? 1 : -1 }); if (f[1].absorb || f[-1].absorb) absorbs.push({ i, s: f[1].absorb ? 1 : -1 });
+    const tg = s => !!(f[s].sweep || f[s].fvg || f[s].sr || f[s].absorb); if (tg(1) === tg(-1)) continue;
+    const s = tg(1) ? 1 : -1; if (i - last[s] < 6) continue; last[s] = i;
+    const w6 = [...Array(6).keys()].map(q => i - q); const okF = w6.every(q => D[q] != null);
+    const of30 = okF ? w6.reduce((x, q) => x + D[q], 0) / w6.reduce((x, q) => x + V[q], 0) : null;
+    const hi24 = Math.max(...H.slice(Math.max(0, i - 287), i + 1)), lo24 = Math.min(...L.slice(Math.max(0, i - 287), i + 1));
+    const F = { ...f[s], flow: of30 != null && of30 * s > 0.03 ? 1 : 0, amd: amd[i] === s ? 1 : 0, trend: (eF[i] - eS[i]) * s > 0 ? 1 : 0, pd: (s === 1 ? C[i] < (hi24 + lo24) / 2 : C[i] > (hi24 + lo24) / 2) ? 1 : 0 };
+    const grade = F.absorb && F.sweep ? "A" : F.absorb ? "B" : "C";
+    const stop = s === 1 ? L[i] - 0.1 * a : H[i] + 0.1 * a, risk = Math.min(Math.max(Math.abs(C[i] - stop), 0.5 * a), 3 * a);
+    sigs.push({ i, t: b[i].t, s, grade, F, entry: C[i], stop: C[i] - s * risk, t1: C[i] + s * risk, t2: C[i] + 2 * s * risk, flowKnown: D[i] != null });
+  }
+  // open FVGs (last 6 h) and S/R at the latest bar
+  const fvgs = []; for (let k = Math.max(2, n - 72); k < n; k++) {
+    if (L[k] > H[k - 2] && Math.min(Infinity, ...L.slice(k + 1)) > H[k - 2]) fvgs.push({ k, lo: H[k - 2], hi: L[k], s: 1 });
+    if (H[k] < L[k - 2] && Math.max(-Infinity, ...H.slice(k + 1)) < L[k - 2]) fvgs.push({ k, lo: H[k], hi: L[k - 2], s: -1 }); }
+  const i = n - 1, tol = 0.25 * atr[i], hs = PH.filter(j => j >= i - 288), ls = PL.filter(j => j >= i - 288);
+  const lv = (arr) => { const out = []; arr.forEach(v => { if (arr.filter(x => Math.abs(x - v) <= tol).length >= 2 && !out.some(o => Math.abs(o - v) <= tol)) out.push(v); }); return out; };
+  return { sigs, sweeps, absorbs, fvgs, sup: lv(ls.map(j => L[j])), res: lv(hs.map(j => H[j])), asia, bias: amd[n - 1], atr: atr[i] };
+}
+function sigLog() { try { return JSON.parse(LS.get("sigLog") || "[]"); } catch (e) { return []; } }
+function trackSignals() {
+  if (!ENG) return; let log = sigLog();
+  ENG.sigs.filter(x => x.grade !== "C" && Date.now() - (x.t + B5MS) < 20 * 60e3).forEach(x => {
+    if (log.some(y => y.t === x.t && y.s === x.s)) return;
+    log.push({ t: x.t, s: x.s, g: x.grade, e: x.entry });
+    const msg = `${x.s > 0 ? "LONG" : "SHORT"} · grade ${x.grade} at $${fmt(x.entry, 0)} · stop ${fmt(x.stop, 0)} · tested ${Math.round(GRADE[x.grade].hit[2] * 100)}% right in 15 min`;
+    try { navigator.vibrate && navigator.vibrate(x.grade === "A" ? [250, 100, 250, 100, 250] : [200, 100, 200]); } catch (e) {}
+    try { if (window.Notification && Notification.permission === "granted") new Notification(`BTC ${x.s > 0 ? "▲ LONG" : "▼ SHORT"} · ${x.grade}`, { body: msg, icon: "icon.svg", tag: "btc-setup-" + x.t }); } catch (e) {}
+  });
+  log.forEach(y => { if (y.res == null) { const end = y.t + B5MS + 15 * 60e3, c = candles.filter(k => k.t < end).pop(); if (Date.now() > end + 60e3 && c && c.t >= end - 120e3) y.res = (c.c - y.e) * y.s > 0 ? 1 : 0; } });
+  LS.set("sigLog", JSON.stringify(log.slice(-300)));
+}
+function renderSetup() {
+  const chip = $("feedChip"); chip.textContent = feed === "Coinbase" ? "order flow: Coinbase (builds while open)" : feed ? "order flow: " + feed : "order flow: offline"; chip.className = "chip " + (feed && feed !== "Coinbase" ? "ok" : "warn");
+  if (!ENG) return;
+  const now = Date.now(), ab = ENG.sigs.filter(x => x.grade !== "C"), cur = ab.length ? ab[ab.length - 1] : null, fresh = cur && now - (cur.t + B5MS) < 30 * 60e3;
+  const lastC = ENG.sigs.length ? ENG.sigs[ENG.sigs.length - 1] : null, show = fresh ? cur : (lastC && now - (lastC.t + B5MS) < 15 * 60e3 ? lastC : null);
+  const card = $("setCard"), badge = $("gBadge");
+  if (!show) {
+    card.className = "card call flat full"; badge.className = "grade"; badge.textContent = "–"; $("sDir").textContent = "No setup · waiting";
+    $("sSub").textContent = cur ? `Last A/B: ${cur.s > 0 ? "LONG" : "SHORT"} ${cur.grade} at ${new Date(cur.t + B5MS).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ($${fmt(cur.entry, 0)}).` : "No A or B setup in the last 12 hours of bars. A shows up about every other day; B 2–3 times a day.";
+    ["sEntry", "sStop", "sTgt", "sStat"].forEach(id => $(id).textContent = "—"); $("sHit").textContent = "—"; $("sWhy").innerHTML = "";
+  } else {
+    const L = show.s > 0; card.className = "card call full " + (show.grade === "C" ? "flat" : L ? "up" : "down"); badge.className = "grade " + show.grade; badge.textContent = show.grade;
+    $("sDir").textContent = `${L ? "LONG ▲" : "SHORT ▼"} · ${show.grade === "A" ? "high confidence" : show.grade === "B" ? "confident" : "weak"}`;
+    $("sSub").textContent = `${GRADE[show.grade].name} · closed ${new Date(show.t + B5MS).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · ${GRADE[show.grade].freq}`;
+    $("sEntry").textContent = fmt(show.entry, 0); $("sStop").textContent = fmt(show.stop, 0); $("sTgt").textContent = `${fmt(show.t1, 0)} / ${fmt(show.t2, 0)}`;
+    $("sHit").textContent = GRADE[show.grade].hit.map(h => Math.round(h * 100) + "%").join(" · ");
+    let st = "open", sn = show.stop; for (const c of candles.filter(k => k.t >= show.t + B5MS)) { if (L ? c.l <= sn : c.h >= sn) { st = "stopped −1R"; break; } if (L ? c.h >= show.t2 : c.l <= show.t2) { st = "target 2R hit"; break; } if (L ? c.h >= show.t1 : c.l <= show.t1) st = "1R reached"; }
+    const m15 = candles.find(k => k.t === show.t + B5MS + 14 * 60e3); if (st === "open" || st === "1R reached") st += m15 ? ((m15.c - show.entry) * show.s > 0 ? " · 15-min ✓" : " · 15-min ✗") : "";
+    $("sStat").textContent = st;
+    $("sWhy").innerHTML = Object.entries(FACT).map(([k, v]) => `<span class="${show.F[k] ? (v[2] === "neg" ? "neg" : v[2] === "key" ? "key" : "on") : ""}">${show.F[k] ? "✓" : "·"} ${v[0]}</span>`).join("") + (show.flowKnown ? "" : `<span class="neg">order flow unknown for this bar</span>`);
+  }
+  const log = sigLog().filter(x => x.res != null), rec = g => { const a = log.filter(x => x.g === g); return a.length ? `${g} ${a.filter(x => x.res).length}/${a.length}` : null; };
+  $("sRec").textContent = [rec("A"), rec("B")].filter(Boolean).join(" · ") || "none yet";
+}
+function renderChart5() {
+  const svg = $("chart5"); if (!ENG || B5.length < 20) return;
+  const N = 72, b = B5.slice(-N), off = B5.length - b.length, W = 600, Hh = 300, P = { l: 6, r: 56, t: 12, b: 18 };
+  let hi = Math.max(...b.map(x => x.h)), lo = Math.min(...b.map(x => x.l)); const pad = (hi - lo) * 0.06 || 1;
+  const Y = v => P.t + (hi + pad - v) / ((hi - lo) + 2 * pad) * (Hh - P.t - P.b), step = (W - P.l - P.r) / N, X = i => P.l + i * step + step / 2, inR = v => v > lo - pad && v < hi + pad;
+  let g = "";
+  for (let k = 0; k <= 4; k++) { const v = lo + (hi - lo) * k / 4; g += `<line x1="${P.l}" x2="${W - P.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width=".6"/><text x="${W - P.r + 6}" y="${Y(v) + 3}">${fmt(v, 0)}</text>`; }
+  b.forEach((x, i) => { if (i % 12 === 0) g += `<text x="${X(i)}" y="${Hh - 4}" text-anchor="middle">${new Date(x.t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</text>`; });
+  const A = ENG.asia; if (A) { const i0 = Math.max(0, b.findIndex(x => x.t >= A.t0)), i1 = b.findIndex(x => x.t >= A.t0 + 7 * 3600e3); if (b.some(x => x.t >= A.t0)) {
+    const x1 = X(i0) - step / 2, x2 = i1 < 0 ? W - P.r : X(i1) - step / 2; if (inR(A.hi) || inR(A.lo)) g += `<rect x="${x1}" y="${Y(Math.min(A.hi, hi + pad))}" width="${Math.max(x2 - x1, 1)}" height="${Math.max(Y(Math.max(A.lo, lo - pad)) - Y(Math.min(A.hi, hi + pad)), 1)}" fill="var(--gold)" opacity=".08"/><text x="${x1 + 3}" y="${Y(Math.min(A.hi, hi + pad)) + 11}" style="fill:var(--gold)">Asia · ${ENG.bias > 0 ? "bias ▲" : ENG.bias < 0 ? "bias ▼" : "no bias"}</text>`;
+    [A.hi, A.lo].forEach(v => { if (inR(v)) g += `<line x1="${x2}" x2="${W - P.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--gold)" stroke-width=".8" stroke-dasharray="2 3" opacity=".7"/>`; }); } }
+  ENG.sup.forEach(v => { if (inR(v)) g += `<rect x="${P.l}" y="${Y(v) - 3}" width="${W - P.r - P.l}" height="6" fill="var(--up)" opacity=".15"/>`; });
+  ENG.res.forEach(v => { if (inR(v)) g += `<rect x="${P.l}" y="${Y(v) - 3}" width="${W - P.r - P.l}" height="6" fill="var(--down)" opacity=".15"/>`; });
+  ENG.fvgs.forEach(f => { const i = f.k - off; if (i < 0) return; g += `<rect x="${X(i - 2) - step / 2}" y="${Y(f.hi)}" width="${W - P.r - X(i - 2) + step / 2}" height="${Math.max(Y(f.lo) - Y(f.hi), 1)}" fill="var(--blue)" opacity=".13"/>`; });
+  b.forEach((x, i) => { const up = x.c >= x.o, col = up ? "var(--up)" : "var(--down)", bw = Math.max(step * 0.62, 1.5);
+    g += `<line x1="${X(i)}" x2="${X(i)}" y1="${Y(x.h)}" y2="${Y(x.l)}" stroke="${col}" stroke-width="1"/><rect x="${X(i) - bw / 2}" y="${Y(Math.max(x.o, x.c))}" width="${bw}" height="${Math.max(Math.abs(Y(x.o) - Y(x.c)), 1)}" fill="${col}"/>`; });
+  ENG.sweeps.forEach(s => { const i = s.i - off, x = b[i]; if (!x) return; g += `<text x="${X(i)}" y="${s.s > 0 ? Y(x.l) + 10 : Y(x.h) - 2}" text-anchor="middle" style="fill:var(--blue);font-size:9px;font-weight:800">✕</text>`; });
+  ENG.absorbs.forEach(s => { const i = s.i - off, x = b[i]; if (!x) return; g += `<text x="${X(i)}" y="${s.s > 0 ? Y(x.l) + 19 : Y(x.h) - 11}" text-anchor="middle" style="fill:var(--gold);font-size:9px">◆</text>`; });
+  ENG.sigs.forEach(s => { const i = s.i - off, x = b[i]; if (!x) return; const up = s.s > 0, col = up ? "var(--up)" : "var(--down)", y = up ? Y(x.l) + 30 : Y(x.h) - 20, op = s.grade === "C" ? .45 : 1;
+    g += `<g opacity="${op}"><text x="${X(i)}" y="${y}" text-anchor="middle" style="fill:${col};font-size:${s.grade === "C" ? 10 : 13}px;font-weight:800">${s.grade}${up ? "▲" : "▼"}</text><title>${up ? "LONG" : "SHORT"} ${s.grade}: ${GRADE[s.grade].name} · entry ${fmt(s.entry, 0)}</title></g>`; });
+  const cur = ENG.sigs.filter(x => x.grade !== "C").pop();
+  if (cur && Date.now() - cur.t < 3 * 3600e3) { const i = cur.i - off; if (i >= 0) [[cur.entry, "var(--fg)", "entry"], [cur.stop, "var(--down)", "stop"], [cur.t2, "var(--up)", "2R"]].forEach(([v, c, t]) => { if (inR(v)) g += `<line x1="${X(i)}" x2="${W - P.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${c}" stroke-width="1" stroke-dasharray="4 3"/><text x="${W - P.r + 6}" y="${Y(v) + 3}" style="fill:${c};font-weight:700">${t}</text>`; }); }
+  if (last && inR(last)) g += `<circle cx="${X(b.length - 1) + step}" cy="${Y(last)}" r="3.5" fill="var(--fg)"/>`;
+  svg.innerHTML = g;
+  $("c5meta").textContent = `last 6 h · ${ENG.sigs.filter(x => x.grade !== "C" && x.t >= b[0].t).length} A/B setups`;
+}
+function renderFacts() {
+  $("factTbl").innerHTML = `<span class="ph">Grade / factor</span><span class="ph">Right 15 min later · '23–24 / '25 / '26</span><span class="ph"></span>` +
+    Object.entries(GRADE).map(([g, v]) => `<span class="nm"><b>${g}</b>&nbsp;${v.name}</span><span class="num ${g === "A" ? "good" : g === "B" ? "" : "muted"}">${v.hit.map(h => Math.round(h * 1000) / 10 + "%").join(" / ")}</span><span></span>`).join("") +
+    Object.entries(FACT).map(([k, v]) => `<span class="nm muted">${v[0]}</span><span class="num ${v[2] === "neg" ? "bad" : "muted"}">${v[1].map(h => Math.round(h * 1000) / 10 + "%").join(" / ")}</span><span></span>`).join("");
+}
+async function setupLoop(first) {
+  if (first) await pollCbTrades(1);
+  await loadB5(); if (feed === "Coinbase") { await pollCbTrades(first ? 12 : 1); await loadB5(); }
+  try { ENG = runEngine(B5); } catch (e) { ENG = null; }
+  trackSignals(); renderSetup(); renderChart5();
+}
+function setNotifyTxt() { const s = window.Notification ? Notification.permission : "unsupported"; $("notifyTxt").textContent = s === "granted" ? "On · alerts fire while this page is open" : s === "denied" ? "Blocked in your browser settings" : s === "unsupported" ? "This browser can't show alerts; add the app to your home screen (iPhone: iOS 16.4+)" : ""; $("notifyBtn").hidden = s === "granted" || s === "unsupported"; }
+$("notifyBtn").onclick = async () => { try { await Notification.requestPermission(); } catch (e) {} setNotifyTxt(); };
+setNotifyTxt(); renderFacts(); setupLoop(true); setInterval(() => setupLoop(false), 20000);
+setInterval(() => { if (feed === "Coinbase") pollCbTrades(1); }, 8000);
+
 // ---------- wiring
 function setMode(m) { chartMode = m; LS.set("chart", m); $("cCandle").setAttribute("aria-pressed", m === "candle"); $("cLine").setAttribute("aria-pressed", m === "line"); renderChart(); }
 function setPat(on) { showPat = on; LS.set("pat", on ? "on" : "off"); $("pOn").setAttribute("aria-pressed", on); $("pOff").setAttribute("aria-pressed", !on); $("patList").hidden = !on; renderChart(); }
