@@ -61,6 +61,9 @@ details summary { cursor:pointer; color:var(--muted); font-size:13px; } details[
 .pats { display:grid; grid-template-columns: minmax(0,1fr) auto auto; gap:4px 12px; font-size:12.5px; align-items:center; }
 .pats .ph { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; font-weight:700; } .pats .nm { display:flex; gap:6px; align-items:center; }
 .pats .ic { font-weight:800; width:14px; text-align:center; } .pats .last { font-family:var(--mono); color:var(--muted); }
+.tb { display:grid; grid-template-columns: auto 1fr 1fr auto; gap:6px 12px; align-items:center; font-size:13.5px; }
+.tb .h { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-weight:700; } .tb .tf { font-weight:700; }
+.tb .u { color:var(--up); font-weight:700; } .tb .d { color:var(--down); font-weight:700; } .tb .acc { font:500 12px var(--mono); color:var(--muted); }
 .model .state { font-size:22px; font-weight:800; } .note { font-size:12.5px; color:var(--muted); line-height:1.55; }
 </style></head><body>
 <div class="wrap">
@@ -117,6 +120,11 @@ details summary { cursor:pointer; color:var(--muted); font-size:13px; } details[
     <div class="hist" id="hist"></div>
   </section>
 
+  <section class="card">
+    <div class="card-h"><h2>Trend board</h2><span class="small muted">tested 2023–26</span></div>
+    <div class="tb" id="tb"></div>
+    <div class="note">Direction of the last closed bar and of price vs its 20-bar average, per timeframe. Tested on 4 years of BTC: as next-bar calls these are right 44–55% of the time and flip between years, so read them as the backdrop, not as signals.</div>
+  </section>
   <section class="card model">
     <div class="card-h"><h2>Hourly model · tested</h2><span class="chip" id="hTrend">—</span></div>
     <div class="state" id="hWord">—</div>
@@ -132,7 +140,7 @@ details summary { cursor:pointer; color:var(--muted); font-size:13px; } details[
 
   <section class="card">
     <h2>How to read this</h2>
-    <p class="note" style="margin:0">The window call is the chance BTC ends above the strike, from its distance to the strike, the last hour's volatility and the time left. In our 4-year test Kalshi's own price picked winners slightly better (65% vs 62%) and trading the gaps lost about 1¢ per contract after fees. Use it to read the lean at a glance and to avoid overpaying. "Expensive" means skip. Minute-by-minute momentum and order flow tested at 47–49%: no edge, so they're shown as context only. Kalshi settles on the CF Benchmarks index; Coinbase is a close proxy.</p>
+    <p class="note" style="margin:0">With Kalshi connected, the headline is Kalshi's own probability: in our tests it called the window right more often than any model we built (70% vs 67% at minute 5, 83% vs 80% at minute 11). Without it, the headline is our estimate: the chance BTC ends above the strike, from its distance to the strike, the last hour's volatility and the time left. In our 4-year test Kalshi's own price picked winners slightly better (65% vs 62%) and trading the gaps lost about 1¢ per contract after fees. Use it to read the lean at a glance and to avoid overpaying. "Expensive" means skip. Minute-by-minute momentum and order flow tested at 47–49%: no edge, so they're shown as context only. Kalshi settles on the CF Benchmarks index; Coinbase is a close proxy.</p>
   </section>
 </div>
 <script>
@@ -177,10 +185,11 @@ function render() {
   const s = sigma();
   if (last && K && s) {
     const sd = s * Math.sqrt(minsLeft), z = Math.log(last / K) / sd; prob = Phi(z);
-    const dirTxt = prob >= 0.6 ? "Leaning up" : prob <= 0.4 ? "Leaning down" : "Coin flip";
-    $("callCard").className = "card call " + (prob >= 0.6 ? "up" : prob <= 0.4 ? "down" : "flat"); $("dir").textContent = dirTxt;
-    $("sub").textContent = minsLeft < 1 ? "Under a minute left: noise near the strike decides it." : `Fair Kalshi price ≈ Yes ${Math.round(prob * 100)}¢ · No ${Math.round(100 - prob * 100)}¢`;
-    $("pYes").textContent = Math.round(prob * 100) + "%"; $("pNo").textContent = Math.round(100 - prob * 100) + "%"; $("meter").style.width = (prob * 100).toFixed(1) + "%";
+    const km = kalshi && kalshi.yesAsk != null && kalshi.yesBid != null ? (kalshi.yesAsk + kalshi.yesBid) / 200 : null; const head = km ?? prob;
+    const dirTxt = head >= 0.6 ? "Leaning up" : head <= 0.4 ? "Leaning down" : "Coin flip";
+    $("callCard").className = "card call " + (head >= 0.6 ? "up" : head <= 0.4 ? "down" : "flat"); $("dir").textContent = dirTxt;
+    $("sub").textContent = km != null ? `Kalshi market: Yes ${Math.round(km * 100)}% (best predictor in our tests) · our estimate ${Math.round(prob * 100)}%` : (minsLeft < 1 ? "Under a minute left: noise near the strike decides it." : `Our estimate (connect Kalshi for the market's own, more accurate number) · fair Yes ${Math.round(prob * 100)}¢`);
+    $("pYes").textContent = Math.round(head * 100) + "%"; $("pNo").textContent = Math.round(100 - head * 100) + "%"; $("meter").style.width = (head * 100).toFixed(1) + "%";
     $("px").textContent = "$" + fmt(last, 0); $("k").textContent = "$" + fmt(K, 0); const d = last - K;
     $("dist").textContent = `${d >= 0 ? "+" : "−"}${fmt(Math.abs(d), 0)}`; $("dist").className = "v " + (d >= 0 ? "good" : "bad");
     $("sig").textContent = "±" + fmt(last * sd, 0);
@@ -265,6 +274,32 @@ function renderPatList() {
     const hr = v[2] == null ? "—" : `${Math.round(v[2] * 100)}% · ${v[3] >= 0 ? "+" : ""}${v[3]} bp`;
     return `<span class="nm"><span class="ic" style="color:${v[1] > 0 ? "var(--up)" : "var(--down)"}">${v[1] > 0 ? "▲" : "▼"}</span>${v[0]}</span><span class="num ${v[2] != null && v[2] >= 0.53 ? "good" : "muted"}">${hr}</span><span class="last">${when}</span>`; }).join("");
 }
+
+
+// ---------- trend board (4h / 6h / 12h / daily)
+const TB_ACC = { "4h": "45–50%", "6h": "47–51%", "12h": "46–53%", "1D": "46–51%" };
+let TBD = {};
+async function loadBoard() {
+  try {
+    const h1 = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600"), h6 = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=21600"),
+          d1 = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400");
+    const mk = a => a.map(c => ({ t: c[0] * 1e3, o: c[3], c: c[4] })).sort((x, y) => x.t - y.t);
+    const group = (bars, ms) => { const m = new Map(); bars.forEach(b => { const k = Math.floor(b.t / ms) * ms; if (!m.has(k)) m.set(k, { t: k, o: b.o, c: b.c }); else m.get(k).c = b.c; }); return [...m.values()]; };
+    const H1 = mk(h1), H6 = mk(h6); TBD = { "4h": group(H1, 4 * 3600e3), "6h": H6, "12h": group(H6, 12 * 3600e3), "1D": mk(d1) };
+  } catch (e) {}
+  renderBoard();
+}
+function renderBoard() {
+  const now = Date.now(), dur = { "4h": 4 * 3600e3, "6h": 6 * 3600e3, "12h": 12 * 3600e3, "1D": 86400e3 };
+  let html = `<span class="h">Bar</span><span class="h">Last bar</span><span class="h">vs 20-bar avg</span><span class="h">Tested right</span>`;
+  for (const k of ["4h", "6h", "12h", "1D"]) {
+    const bars = (TBD[k] || []).filter(b => b.t + dur[k] <= now); if (bars.length < 21) { html += `<span class="tf">${k}</span><span>—</span><span>—</span><span class="acc">${TB_ACC[k]}</span>`; continue; }
+    const lb = bars[bars.length - 1], e = ema(bars.map(b => b.c), 20).pop(), up1 = lb.c >= lb.o, up2 = lb.c >= e;
+    html += `<span class="tf">${k === "1D" ? "Daily" : k}</span><span class="${up1 ? "u" : "d"}">${up1 ? "▲ up" : "▼ down"}</span><span class="${up2 ? "u" : "d"}">${up2 ? "▲ above" : "▼ below"}</span><span class="acc">${TB_ACC[k]}</span>`;
+  }
+  $("tb").innerHTML = html;
+}
+loadBoard(); setInterval(loadBoard, 120000);
 
 // ---------- hourly model (Vest10 rules)
 let H = [], Dd = [];
