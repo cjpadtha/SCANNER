@@ -1,5 +1,8 @@
 # SCANNER — HVN Breakout Scanner
 
+**📈 [Open the BTC Live app →](kalshi/)** (Kalshi 15-min lean + hourly model, phone-friendly)
+
+
 Educational study tool for Bitcoin on the 1-minute chart. It runs inside TradingView, simulates trades in the Strategy Tester, and **never places real orders**. Not financial advice.
 
 ## The rules
