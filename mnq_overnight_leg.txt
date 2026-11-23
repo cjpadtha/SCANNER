@@ -1,0 +1,52 @@
+//@version=6
+// MNQ overnight leg — PAPER CANDIDATE (approved by Cole 2026-11-22 for paper tracking only; not part of ★ MAIN yet)
+// Rule: at the Globex open (18:00 ET), if the daily trend is UP (prior close above its 20-day EMA) → LONG.
+// Stop = 0.5 × the 20-day average overnight range (18:00→09:25). Exit at 09:25 ET. No trade when the trend is down.
+// Test (2023 – Nov 2026, realistic gap fills): avg +0.089R / +0.150R / +0.046R (2023-24 / 2025 / 2026), positive every year;
+// with ★ MAIN, Topstep 50K pass 51% / 70% / 77% vs ~25% for no edge. Funded: use ≈ $250 risk.
+// Chart: MNQ1! 5-minute (any intraday), exchange time zone. Simulation only.
+strategy("MNQ overnight leg (paper)", shorttitle = "ON leg", overlay = true, pyramiding = 0, initial_capital = 50000,
+     default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 1.0)
+riskUsd = input.float(500, "Risk per trade ($) — Combine 500, funded ≈ 250", step = 50)
+k       = input.float(0.5, "Stop = k × 20-day avg overnight range", step = 0.05)
+tz = "America/New_York"
+int hh = hour(time, tz)
+int mm = minute(time, tz)
+float ema20 = request.security(syminfo.tickerid, "D", ta.ema(close, 20)[1], lookahead = barmerge.lookahead_on)
+float dClose = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_on)
+bool trendUp = dClose > ema20
+// overnight range tracking
+var float onHi = na
+var float onLo = na
+var array<float> rngs = array.new_float()
+bool sessStart = hh == 18 and (na(time[1]) or hour(time[1], tz) != 18)
+bool exitTime = (hh == 9 and mm >= 25) or (hh > 9 and hh < 17)
+if sessStart
+    onHi := high
+    onLo := low
+else if not exitTime and not na(onHi)
+    onHi := math.max(onHi, high)
+    onLo := math.min(onLo, low)
+var bool rngDone = false
+if sessStart
+    rngDone := false
+if exitTime and not rngDone and not na(onHi)
+    array.push(rngs, onHi - onLo)
+    if array.size(rngs) > 20
+        array.shift(rngs)
+    rngDone := true
+float avgRng = array.size(rngs) >= 10 ? array.avg(rngs) : na
+var float stopPx = na
+if sessStart and trendUp and not na(avgRng) and strategy.position_size == 0
+    float risk = k * avgRng
+    int qty = math.max(1, int(math.floor(riskUsd / (risk * syminfo.pointvalue))))
+    stopPx := close - risk
+    strategy.entry("ON", strategy.long, qty = qty)
+    strategy.exit("ONX", "ON", stop = stopPx)
+    label.new(bar_index, low, "ON LONG " + str.tostring(close, "#.00") + "\nstop " + str.tostring(stopPx, "#.00") + "\n" + str.tostring(qty) + " MNQ · exit 09:25",
+         style = label.style_label_up, color = color.new(color.teal, 0), textcolor = color.white, size = size.small)
+    alert("ON leg (paper): LONG MNQ " + str.tostring(qty) + " @ " + str.tostring(close, "#.00") + " stop " + str.tostring(stopPx, "#.00") + " exit 09:25 ET", alert.freq_once_per_bar_close)
+if strategy.position_size > 0 and exitTime
+    strategy.close("ON", comment = "09:25")
+plot(strategy.position_size > 0 ? stopPx : na, "Stop", color.red, 2, plot.style_linebr)
+bgcolor(trendUp ? na : color.new(color.gray, 94), title = "Trend down: no overnight trade")

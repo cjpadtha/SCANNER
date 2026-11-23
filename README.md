@@ -1,43 +1,86 @@
-# SCANNER — NQ Confluence Scanner
+# SCANNER — HVN Breakout Scanner
 
-Educational study tool for Nasdaq-100 futures (NQ / MNQ). It does **not** place trades and is not financial advice.
+Educational study tool for Bitcoin on the 1-minute chart. It runs inside TradingView, simulates trades in the Strategy Tester, and **never places real orders**. Not financial advice.
 
-It scores five things and calls a bias when the total reaches +3 or -3:
+## The rules
 
-| Factor | +1 (bullish) | -1 (bearish) |
-|---|---|---|
-| POC (5-day volume profile) | price above POC | price below POC |
-| Liquidity sweep (last 30 min) | swept previous day low, closed back above | swept previous day high, closed back below |
-| Unfilled fair value gaps | more bullish FVGs below price | more bearish FVGs above price |
-| Engulfing candle | bullish engulfing | bearish engulfing |
-| Opening range (09:30–10:00 ET) | above the high | below the low |
+1. **HVN zones** are built from the 2 hours *before* the breakout. High-volume rows of the profile merge into zones; a zone's top/bottom is the highest/lowest **close** inside it.
+2. **Breakout:** candle 1 closes outside the zone, candle 2 closes even further out. Confirmed at candle 2's close.
+3. **Big breakout** (candle 2's body ≥ 1× ATR) → the trade is taken automatically.
+4. **Not big** → no trade, just a grey BUY?/SELL? marker with its score.
+5. The **score** starts at 50 and moves with:
 
-The Python scanner also scores headline sentiment; TradingView can't read news, so the Pine version doesn't.
+   | Factor | Change |
+   |---|---|
+   | 15m market structure with / against the breakout | +15 / −15 |
+   | 1m fair value gap in the breakout direction | +10 |
+   | Opposite-side 1m liquidity sweep in the last 30 bars | +10 |
+   | Breakout candle swept a level and closed back (trap) | −20 |
+   | Big breakout candle | +10 |
+   | High volume on the breakout candles (≥ 1.5× the 20-bar average) | 0 (new — measured only) |
+   | Breakout on the right side of VWAP | 0 (new — measured only) |
+   | Extended: candle 2 closed > 2 ATR past the zone (chasing) | 0 (new — measured only) |
 
-## TradingView (recommended — live data, phone alerts)
+   The score is **points, not a probability**. The real win rate comes from the signal tracking below.
+6. **Stop:** candle 1's low/high (or zone midpoint / far edge, in settings).
+7. **Target:** midpoint of the next HVN in the trade direction; if there isn't one, 2R.
 
-Files in `pine/`:
+## Set it up (TradingView)
 
-- `nq_confluence_indicator.pine` — draws POC, PDH/PDL, opening range, unfilled FVG boxes, nearest HVNs, L/S signal arrows and a score table. Has alerts.
-- `nq_confluence_strategy.pine` — same scoring as a strategy, for TradingView's **Strategy Tester** (the backtest).
+Script: [`pine/hvn_breakout_scanner.pine`](pine/hvn_breakout_scanner.pine)
 
-**Add a script** (needs a computer, at tradingview.com — once added, it also shows in the phone app):
+1. On a computer at tradingview.com, open **`BINANCE:BTCUSDT`** (or `COINBASE:BTCUSD`, `BYBIT:BTCUSDT.P`) on the **1-minute** chart. Use an exchange symbol, not an index like `CRYPTO:BTCUSD`: the HVN zones need real volume.
+2. **Pine Editor** (bottom) → delete the template → paste the script → **Save** → **Add to chart**.
+3. Open **Strategy Tester** for the results. The table on the chart shows trades, win rate and total R for the window.
 
-1. Open a chart of `MNQ1!` or `NQ1!` on the **5-minute** timeframe.
-2. Open **Pine Editor** at the bottom, delete the template, paste the contents of a `.pine` file.
-3. Click **Save**, then **Add to chart**.
+Once added, it shows in the phone app too.
 
-**Phone alerts:** on the chart with the indicator added, click **Alert** → Condition: **NQ Confluence** → pick *NQ confluence LONG*, *SHORT* or *ANY signal* → "Once per bar close" → turn on **Notify in app**. Alerts fire on TradingView's servers, so you get them on your phone even with the app closed.
+**Settings worth knowing** (gear icon):
 
-**Backtest:** add the strategy script, then open **Strategy Tester** at the bottom. Look at Net profit, Percent profitable, Profit factor and the List of trades. By default it enters when the score first reaches ±3, exits after 12 bars (60 min) or at 15:55 ET, and charges 1 point round trip in slippage. Change those in the script's settings (gear icon) and **Properties** tab.
+- *Simulate the last N hours* — default 24. Raise it (e.g. 72–168) for more trades; free plans load fewer 1m bars.
+- *Only signal during* — all hours (default; BTC trades 24/7), NY stock-market hours, or the 09:30–11:00 ET killzone, when BTC volume is usually highest.
+- *Only auto-take breakouts that agree with 15m structure* — off by default.
+- Sizing is 10% of equity; costs are 0.1% commission per fill (typical taker fee). Set your exchange's fee in **Properties**. On 1m trades fees matter a lot: 0.2% round trip is about $190 per BTC at a $95k price, so a target only a few hundred dollars away loses a big share of it to fees.
 
-**Reading the results**
+**What's on the chart:**
 
-- Percent profitable near 50% with a small average trade ≈ no edge.
-- Turn off longs or shorts in settings to see if one side carries everything — often that's just the trend of the period.
-- Free plans load fewer bars, so the test covers a shorter history. A few hundred trades is still a small sample.
+- **Trades taken:** a teal BUY / red SELL label with planned R:R, entry price, score, the score band's measured win rate and the break-even win rate, plus a green target box and red stop box (like TradingView's position tool) that end where the trade exits, with the result in R printed there.
+- **Not-taken signals:** small grey triangles — hover one for its score, measured win rate and reasons. Switch to full labels or off under *Display*.
+- **HVN zones** (last 2h): green = support below price, red = resistance above, orange = price inside. Dotted line = zone midpoint (the trade target). The label shows the price range and the zone's share of 2h volume.
+- **Stats table** bottom right (movable / hideable under *Display*).
 
-## Python (optional)
+**Turn off TradingView's own trade markers** (the purple L / LX / S / SX arrows with `+0.0166` sizes): strategy settings (gear) → **Style** → untick **Trades on chart**. Scripts can't hide these themselves.
+
+**Phone alerts:** Alert (clock icon) → Condition: **HVN Breakout** → **alert() function calls only** → turn on **Notify in app**. You'll get the side, score, measured win rate, entry, stop and target for every trade taken. Turn on *Also alert on not-taken signals* in settings to get the grey ones too.
+
+## Signal tracking (real win rates)
+
+Every signal — taken or not — is followed until price hits its target or its stop (if both happen in the same 1m bar it counts as a stop) or 240 bars pass. The result is recorded in R **after fees** (fee per fill set under *Signal tracking*; keep it equal to the Commission in Properties).
+
+The **"What really happened"** table (bottom left) shows, for the simulation window:
+
+- **All signals** — count, % that made money, average R.
+- **By score** (under 50 / 50–64 / 65–79 / 80+) — does a higher score actually win more? If not, the weights are wrong.
+- **By check** — for each check, avg R when it was present vs. absent ("avg R without"). A check is worth weight only if the first is clearly higher than the second over ~30+ signals.
+- **By session** — Asia / London / NY (ET).
+
+Each trade label now reads e.g. `BUY 2.3R @ 95,120 · score 85 · 31% won (n24) · need 34%`: the score band's measured win rate so far (only from signals that finished before this one) and the win rate this trade needs to break even with its R:R and fees. Shown once a band has at least 10 finished signals.
+
+*Only auto-take if this signal's score band has made money so far* uses this live: it skips a trade unless earlier signals with a similar score averaged above 0R.
+
+**Using it to set the weights:** run 168h (or as long as your plan allows), read the "By check" rows, then raise the weight of checks whose avg R beats "avg R without" and lower or zero the ones that don't. Keep the window the same between changes. More checks ≠ better — with one or two weeks of data, a few strong checks beat many weak ones.
+
+## Reading the results
+
+- Judge it in **R**: avg R per trade above 0 after fees is the bar to clear. The chart table's R is after commission, so it matches the Strategy Tester.
+- A handful of trades over a day or two is noise. Look at 50+ trades before trusting it.
+- Try the 15m-structure filter on and off, and the session filter, and compare total R.
+- 1m stops are tight, so fees can be a full R or more. Test: set commission to 0 in Properties to see the edge before fees, then try *Skip trades whose target is closer than x%* (e.g. 0.5), *Extra stop buffer* (e.g. 0.5 ATR) and *Only auto-take if score ≥* (e.g. 70). Change one at a time over the same window.
+
+## Python (older confluence model)
+
+`nq_scanner.py` and `backtest.py` are the earlier POC / sweep / FVG / opening-range confluence score using Yahoo data. They don't implement the HVN breakout rules above.
+
 
 ```
 pip install -r requirements.txt
