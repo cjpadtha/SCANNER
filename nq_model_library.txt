@@ -11,6 +11,8 @@
 //  HVN    (secondary, only as a "first trade of the day" candidate) 2h HVN zone; candle 1 closes outside, candle 2 further out with a body
 //         >= 0.25 ATR, 09:30-11:00, no trap sweep, no opposite-side sweep in the last 30 bars → enter; stop beyond candle 1; trailing stop 2 ATR once +1R (vault's 4-year HVN version)
 //  IMOM   direction from yesterday's 16:00 close to 10:00 → enter at 15:30 in that direction; stop 0.25 x average daily range; exit at the close
+// QQQ MODE (2026-11-23): put this script on a QQQ 5-minute chart for free real-time signals. Same rules (QQQ vs the research index: daily trend 100% same,
+// 5-min moves r = 0.998, ORB15 breaks same direction 20/20 days). Alerts send stop/target as % so MAIN Desk converts them to MNQ prices. ③ overnight is off on QQQ.
 // ★ MAIN ③ overnight (fallback, 2026-11-22): long 18:00→09:25 ET if the daily trend is up and today's MAIN didn't finish positive; stop 0.5× 20d avg overnight range.
 // Filters  daily trend (prior daily close vs 20-day EMA) · 15-minute structure · VWAP side (session VWAP from 09:30) · order flow (last 30 min of 1m candles)
 // ★ MAIN (Cole's main model) = up to 2 trades a day, one position at a time:
@@ -56,6 +58,7 @@ showTbl  = input.string("Compact", "Info box", options = ["Compact", "Full ranki
 tblPos   = input.string("Top right", "Info box position", options = ["Top right", "Bottom right", "Bottom left", "Top left"], group = grpD)
 
 string TZ = "America/New_York"
+bool proxy = syminfo.type != "futures"      // QQQ / NDX chart = free real-time signal source; levels are sent as % so MAIN Desk converts them to MNQ
 int mn = hour(time, TZ) * 60 + minute(time, TZ)                   // bar OPEN time in minutes after midnight ET
 bool isRth = mn >= 570 and mn < 960
 bool rthStart = isRth and not (mn[1] >= 570 and mn[1] < 960)
@@ -370,7 +373,8 @@ if d != 0 and canTrade
     float rr = na(tgt) ? na : math.abs(tgt - close) / math.abs(close - stp)
     alert('{"app":"MAIN","ev":"entry","setup":"' + why + '","side":"' + (d == 1 ? "long" : "short") + '","entry":' + str.tostring(close, format.mintick) +
          ',"stop":' + str.tostring(stp, format.mintick) + ',"tp":' + (na(tgt) ? "null" : str.tostring(tgt, format.mintick)) + ',"qty":' + str.tostring(qty) +
-         ',"exit":"15:55","trend":' + str.tostring(dTrend) + ',"s15":' + str.tostring(s15) + ',"t":"' + str.format_time(time_close, "yyyy-MM-dd HH:mm", TZ) + '"}', alert.freq_once_per_bar_close)
+         ',"exit":"15:55","sym":"' + syminfo.ticker + '","proxy":' + (proxy ? "true" : "false") + ',"stopPct":' + str.tostring(math.abs(close - stp) / close * 100, "#.####") +
+         ',"tpPct":' + (na(tgt) ? "null" : str.tostring(math.abs(tgt - close) / close * 100, "#.####")) + ',"trend":' + str.tostring(dTrend) + ',"s15":' + str.tostring(s15) + ',"t":"' + str.format_time(time_close, "yyyy-MM-dd HH:mm", TZ) + '"}', alert.freq_once_per_bar_close)
     pEntry := close
     pRisk := math.abs(close - stp)
     pDir := d
@@ -400,7 +404,7 @@ if strategy.position_size != 0 and pTrail and not na(pSl) and bar_index > box.ge
         float prevStop = pStop
         pStop := pDir == 1 ? math.max(pStop, lvl) : math.min(pStop, lvl)
         if pStop != prevStop
-            alert('{"app":"MAIN","ev":"move_stop","stop":' + str.tostring(pStop, format.mintick) + ',"t":"' + str.format_time(time_close, "yyyy-MM-dd HH:mm", TZ) + '"}', alert.freq_once_per_bar_close)
+            alert('{"app":"MAIN","ev":"move_stop","stop":' + str.tostring(pStop, format.mintick) + ',"proxy":' + (proxy ? "true" : "false") + ',"stopFromEntryPct":' + str.tostring((pStop - pEntry) / pEntry * 100, "#.####") + ',"t":"' + str.format_time(time_close, "yyyy-MM-dd HH:mm", TZ) + '"}', alert.freq_once_per_bar_close)
         strategy.exit(pDir == 1 ? "LX" : "SX", pDir == 1 ? "L" : "S", stop = pStop)
 
 // stretch the open trade's boxes; on exit, stop them at the exit bar and print the result in R
@@ -414,7 +418,7 @@ if strategy.closedtrades > lastClosed
     float ex = strategy.closedtrades.exit_price(j)
     int xb = strategy.closedtrades.exit_bar_index(j)
     float rRes = pRisk > 0 ? (ex - pEntry) * pDir / pRisk : 0.0
-    alert('{"app":"MAIN","ev":"exit","price":' + str.tostring(ex, format.mintick) + ',"R":' + str.tostring(rRes, "#.##") + ',"t":"' + str.format_time(time_close, "yyyy-MM-dd HH:mm", TZ) + '"}', alert.freq_once_per_bar_close)
+    alert('{"app":"MAIN","ev":"exit","price":' + str.tostring(ex, format.mintick) + ',"proxy":' + (proxy ? "true" : "false") + ',"R":' + str.tostring(rRes, "#.##") + ',"t":"' + str.format_time(time_close, "yyyy-MM-dd HH:mm", TZ) + '"}', alert.freq_once_per_bar_close)
     if showPos and not na(pSl)
         box.set_right(pSl, xb)
         if not na(pTp)
@@ -449,7 +453,7 @@ if legEnd and not na(legHi)
     legHi := na
     legLo := na
 float legAvg = array.size(legRngs) >= 10 ? array.avg(legRngs) : na
-if useON and mSetup == "MAIN" and legStart and inWindow and strategy.position_size == 0 and dTrend == 1 and dayR <= 0 and not na(legAvg)
+if useON and not proxy and mSetup == "MAIN" and legStart and inWindow and strategy.position_size == 0 and dTrend == 1 and dayR <= 0 and not na(legAvg)
     float oRisk = onK * legAvg
     float oStp = close - oRisk
     int oQty = int(math.max(1, math.min(maxQty, math.floor(riskUsd / (oRisk * syminfo.pointvalue)))))
