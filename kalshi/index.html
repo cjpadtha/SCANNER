@@ -90,6 +90,16 @@ details summary { cursor:pointer; color:var(--muted); font-size:13px; } details[
     </div>
   </section>
 
+  <section class="card" id="patCard">
+    <div class="card-h"><h2>Pattern alert · paper-tracked</h2><span class="chip" id="paChip">watching</span></div>
+    <div class="state" id="paWord" style="font-size:22px;font-weight:800">No alert</div>
+    <div class="stats">
+      <div class="stat"><div class="k">1-min order flow</div><div class="v" id="paFlow">—</div></div>
+      <div class="stat"><div class="k">Volatility vs normal</div><div class="v" id="paVol">—</div></div>
+      <div class="stat"><div class="k">Alerts tracked here</div><div class="v" id="paRec">—</div></div>
+    </div>
+    <div class="note">Fires when sellers dominate the last minute (taker flow below −30%) while BTC is moving fast (15-min volatility > 1.5× the hour's). Kalshi's price is based on distance to the strike and tends to underprice the follow-through: on real Kalshi data, buying <b>No</b> here made +7.9¢ per contract (83 windows, 61% won; held on unseen windows). The mirror (buying surge → Yes) did <b>not</b> work. Small sample from Aug–Sep 2026 and one of 252 patterns searched, so it's tracked here before trusting it.</div>
+  </section>
   <section class="card">
     <div class="card-h"><h2>Kalshi · live prices</h2><span class="chip" id="kChip">not connected</span></div>
     <div class="tbl">
@@ -300,6 +310,37 @@ function renderBoard() {
   $("tb").innerHTML = html;
 }
 loadBoard(); setInterval(loadBoard, 120000);
+
+
+// ---------- pattern alert: selling surge in a fast market → lean No (paper-tracked)
+let flow1 = null, volr = null;
+async function loadFlow() {
+  try {
+    const tr = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/trades?limit=1000");
+    const cut = Date.now() - 60e3; let tb = 0, ts = 0;
+    for (const x of tr) { if (Date.parse(x.time) < cut) continue; const v = +x.size; if (x.side === "sell") tb += v; else ts += v; }   // Coinbase 'side' = maker side → taker buy when side is "sell"
+    flow1 = (tb + ts) > 0 ? (tb - ts) / (tb + ts) : null;
+  } catch (e) { flow1 = null; }
+  const c = candles.slice(-61);
+  if (c.length > 30) { const r = []; for (let i = 1; i < c.length; i++) r.push(Math.log(c[i].c / c[i - 1].c)); const sd = a => { const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / (a.length - 1)); }; volr = sd(r.slice(-15)) / sd(r); }
+  renderAlert();
+}
+function paLog() { try { return JSON.parse(LS.get("paLog") || "[]"); } catch (e) { return []; } }
+function renderAlert() {
+  $("paFlow").textContent = flow1 == null ? "—" : `${flow1 >= 0 ? "+" : ""}${Math.round(flow1 * 100)}%`; $("paFlow").className = "v " + (flow1 == null ? "" : flow1 >= 0 ? "good" : "bad");
+  $("paVol").textContent = volr == null ? "—" : volr.toFixed(2) + "×";
+  const w = win(), mins = (Date.now() - w.s) / 60e3, fire = flow1 != null && volr != null && flow1 < -0.3 && volr > 1.5 && mins >= 1 && mins <= 14;
+  let log = paLog();
+  if (fire && !log.some(x => x.s === w.s)) { log.push({ s: w.s, k: K, at: Date.now(), noAsk: kalshi?.noAsk ?? null }); try { navigator.vibrate && navigator.vibrate([150, 80, 150]); } catch (e) {} }
+  log.forEach(x => { if (x.res == null && Date.now() > x.s + Q + 60e3) { const lc = candles.filter(c => c.t >= x.s && c.t < x.s + Q).pop(); if (lc && x.k) x.res = lc.c < x.k ? "No won" : "Yes won"; } });
+  LS.set("paLog", JSON.stringify(log.slice(-200)));
+  const cur = log.find(x => x.s === w.s);
+  $("paWord").textContent = cur ? "Selling surge → lean NO" : "No alert"; $("paWord").style.color = cur ? "var(--down)" : "var(--muted)";
+  $("paChip").textContent = cur ? "ALERT this window" : "watching"; $("paChip").className = "chip " + (cur ? "warn" : "");
+  const done = log.filter(x => x.res), won = done.filter(x => x.res === "No won").length;
+  $("paRec").textContent = done.length ? `${won}/${done.length} No won` : "none yet";
+}
+loadFlow(); setInterval(loadFlow, 10000);
 
 // ---------- hourly model (Vest10 rules)
 let H = [], Dd = [];
