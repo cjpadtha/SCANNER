@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>BTC 15m Lean</title>
-<meta name="theme-color" content="#0e1215"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>BTC Live Signals</title>
+<meta name="theme-color" content="#0e1215"><link rel="manifest" href="manifest.json"><link rel="apple-touch-icon" href="icon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230e1215'/%3E%3Cpath d='M20 40l12-16 12 16' stroke='%23f0b429' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
 /* Phone-first: countdown + big lean card on top, then the numbers that drive it, then a price check vs Kalshi, then the honest note. */
@@ -29,12 +29,24 @@ input:focus-visible { outline:2px solid var(--info); outline-offset:2px; }
 .status { font-size:12px; }
 </style></head><body>
 <div class="wrap">
-  <div class="top"><h1>BTC 15-min lean</h1><div class="spacer"></div><span class="muted small" id="winLbl">—</span><span class="clock" id="left">--:--</span></div>
+  <div class="top"><h1>BTC live</h1><div class="spacer"></div><span class="muted small" id="winLbl">—</span><span class="clock" id="left">--:--</span></div>
   <div class="card lean flat" id="leanCard" aria-live="polite">
     <div class="word" id="word">LOADING</div>
     <div class="pct" id="pct">—</div>
     <div class="bar" aria-hidden="true"><i id="barI" style="width:50%"></i></div>
     <div class="small muted" id="leanWhy">Chance BTC finishes this window ABOVE the strike (Kalshi “Yes”).</div>
+  </div>
+  <div class="card" id="hourCard"><h2>Hourly model (tested · Vest10 rules)</h2>
+    <div class="word" id="hWord" style="font-size:26px;font-weight:900">—</div>
+    <div class="kv">
+      <div><span class="k">Daily trend</span><span class="v" id="hTrend">—</span></div>
+      <div><span class="k">Last hourly signal</span><span class="v" id="hLast">—</span></div>
+      <div><span class="k">Entry</span><span class="v" id="hEntry">—</span></div>
+      <div><span class="k">Stop / target</span><span class="v" id="hST">—</span></div>
+      <div><span class="k">Move stop to entry at</span><span class="v" id="hBE">—</span></div>
+      <div><span class="k">Next check</span><span class="v" id="hNext">—</span></div>
+    </div>
+    <div class="small muted" id="hWhy">Short only when the daily trend is down: an up hour followed by a solid down hour. Stop above both hours, target 2R, stop to entry at +0.5R, close after 48 h. Tested: ~70% won, about +0.07R per trade after costs (2025–26). Longs are off (untested).</div>
   </div>
   <div class="card"><h2>Live</h2>
     <div class="kv">
@@ -132,5 +144,49 @@ async function tick() {
 }
 async function slow() { try { await loadCandles(); } catch (e) {} await loadKalshi(); render(); }
 ["iK", "iYes", "iNo"].forEach(id => $(id).addEventListener("input", render));
+
+// ---------- hourly model (Vest10 rules) ----------
+let H = [], Dd = [];
+async function loadHourly() {
+  try {
+    const h = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600");
+    const d = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400");
+    H = h.map(c => ({ t: c[0] * 1000, l: c[1], h: c[2], o: c[3], c: c[4] })).sort((a, b) => a.t - b.t);
+    Dd = d.map(c => ({ t: c[0] * 1000, c: c[4] })).sort((a, b) => a.t - b.t);
+  } catch (e) {}
+  renderHourly();
+}
+function renderHourly() {
+  if (H.length < 5 || Dd.length < 25) return;
+  const now = Date.now(); const closedH = H.filter(c => c.t + 3600e3 <= now); const closedD = Dd.filter(c => c.t + 86400e3 <= now);
+  const trendAt = (t) => { const ds = closedD.filter(c => c.t + 86400e3 <= t); if (ds.length < 21) return 0; let e = ds[0].c; const k = 2 / 21;
+    for (const x of ds.slice(1, -1)) e = x.c * k + e * (1 - k); return ds[ds.length - 1].c < e ? -1 : 1; };
+  const tr = trendAt(now); $("hTrend").textContent = tr === -1 ? "DOWN (shorts on)" : "UP (model off)";
+  // scan the last 48 closed hours for signals; take the latest one and follow it
+  let sig = null;
+  for (let i = Math.max(1, closedH.length - 48); i < closedH.length; i++) {
+    const p = closedH[i - 1], c = closedH[i];
+    if (trendAt(c.t + 3600e3) === -1 && p.c > p.o && c.c < c.o && (c.o - c.c) > 0.5 * (c.h - c.l)) {
+      const stop = Math.max(p.h, c.h); if ((stop - c.c) / c.c >= 0.004) sig = { t: c.t + 3600e3, e: c.c, stop, i };
+    }
+  }
+  const nextH = new Date(Math.ceil(now / 3600e3) * 3600e3); $("hNext").textContent = nextH.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (!sig) { $("hWord").textContent = tr === -1 ? "NO SIGNAL · WAIT" : "OFF · DAILY TREND UP"; $("hWord").style.color = "var(--muted)"; ["hLast", "hEntry", "hST", "hBE"].forEach(id => $(id).textContent = "—"); return; }
+  const r = sig.stop - sig.e, tgt = sig.e - 2 * r, be = sig.e - 0.5 * r; let state = "OPEN", stopNow = sig.stop;
+  for (const c of H.filter(x => x.t >= sig.t)) {
+    if (c.h >= stopNow) { state = stopNow < sig.e ? "CLOSED +0.1R (stop at entry)" : "STOPPED −1R"; break; }
+    if (c.l <= tgt) { state = "TARGET HIT +2R"; break; }
+    if (c.l <= be) stopNow = Math.min(stopNow, sig.e - 0.1 * r);
+  }
+  if (state === "OPEN" && last) { if (last >= stopNow) state = stopNow < sig.e ? "CLOSED +0.1R (stop at entry)" : "STOPPED −1R"; else if (last <= tgt) state = "TARGET HIT +2R"; }
+  if (state === "OPEN" && now - sig.t > 48 * 3600e3) state = "CLOSED (48 h)";
+  const open = state === "OPEN", fresh = now - sig.t < 3600e3;
+  $("hWord").textContent = open ? (fresh ? "SHORT SIGNAL (new)" : "SHORT ACTIVE") : "LAST SIGNAL " + state; $("hWord").style.color = open ? "var(--down)" : "var(--muted)";
+  $("hLast").textContent = new Date(sig.t).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+  $("hEntry").textContent = "$" + fmt(sig.e, 0); $("hST").textContent = `$${fmt(stopNow, 0)} / $${fmt(tgt, 0)}`; $("hBE").textContent = stopNow < sig.e ? "done" : "$" + fmt(be, 0);
+  if (open && fresh && !window._buzzed) { window._buzzed = sig.t; try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {} }
+}
+loadHourly(); setInterval(loadHourly, 60000); setInterval(renderHourly, 5000);
+
 slow(); tick(); setInterval(tick, 3000); setInterval(slow, 20000); setInterval(render, 1000);
 </script></body></html>
