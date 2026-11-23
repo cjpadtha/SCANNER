@@ -1,192 +1,376 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>BTC Live Signals</title>
-<meta name="theme-color" content="#0e1215"><link rel="manifest" href="manifest.json"><link rel="apple-touch-icon" href="icon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230e1215'/%3E%3Cpath d='M20 40l12-16 12 16' stroke='%23f0b429' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>BTC Live</title>
+<meta name="theme-color" content="#0b0f12"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BTC Live">
+<link rel="manifest" href="manifest.json"><link rel="apple-touch-icon" href="icon.svg"><link rel="icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <style>
-/* Phone-first: countdown + big lean card on top, then the numbers that drive it, then a price check vs Kalshi, then the honest note. */
-:root { --bg:#0e1215; --panel:#161c20; --panel2:#1d252a; --line:#273138; --fg:#e6ecef; --muted:#8d9ba3; --up:#34c77b; --down:#f05d5d; --flat:#c9a227; --info:#6aa9ec;
-  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; --sans: -apple-system, "Segoe UI", Roboto, system-ui, sans-serif; color-scheme: dark; }
-@media (prefers-color-scheme: light) { :root { --bg:#f3f5f6; --panel:#fff; --panel2:#eef2f4; --line:#d8dfe3; --fg:#14191c; --muted:#5d6b73; --up:#13834a; --down:#c62f2f; --flat:#8a6d00; --info:#2563a6; color-scheme: light; } }
+/* Trading-terminal look: one column on phones, two on tablets. Header with live status + countdown, then the call, the chart,
+   the window history, Kalshi prices, the hourly model and a short method note. */
+:root { --bg:#0b0f12; --panel:#12181d; --panel2:#182027; --line:#222c34; --fg:#e8eef2; --muted:#8a98a2; --faint:#5f6d77;
+  --up:#22c37a; --up-bg:rgba(34,195,122,.12); --down:#f2545b; --down-bg:rgba(242,84,91,.12); --gold:#f0b429; --gold-bg:rgba(240,180,41,.12); --blue:#5aa7f0;
+  --sans:"Inter",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace; color-scheme:dark; }
+@media (prefers-color-scheme: light) { :root { --bg:#f2f4f6; --panel:#ffffff; --panel2:#eef1f4; --line:#dfe4e8; --fg:#121820; --muted:#5b6872; --faint:#8a96a0;
+  --up:#0f9a5c; --up-bg:rgba(15,154,92,.10); --down:#d63a41; --down-bg:rgba(214,58,65,.10); --gold:#a26d00; --gold-bg:rgba(162,109,0,.10); --blue:#2563a6; color-scheme:light; } }
 * { box-sizing:border-box; } [hidden]{display:none!important}
-body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 var(--sans); padding: calc(env(safe-area-inset-top,0px) + 10px) max(14px, env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 24px) max(14px, env(safe-area-inset-left,0px)); }
-.wrap { max-width:560px; margin:0 auto; display:flex; flex-direction:column; gap:12px; }
-.top { display:flex; align-items:baseline; gap:10px; } .top h1 { margin:0; font-size:18px; } .spacer{flex:1}
-.clock { font:700 22px var(--mono); } .muted{color:var(--muted)} .small{font-size:12.5px}
-.card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:10px; }
-h2 { margin:0; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
-.lean { text-align:center; padding:18px 14px; } .lean .word { font-size:40px; font-weight:900; letter-spacing:.02em; line-height:1.05; }
-.lean .pct { font:800 22px var(--mono); margin-top:4px; } .lean.up { border-color:var(--up); } .lean.up .word{color:var(--up)} .lean.down { border-color:var(--down); } .lean.down .word{color:var(--down)}
-.lean.flat .word{color:var(--flat)}
-.bar { height:12px; border-radius:99px; background:color-mix(in srgb, var(--down) 70%, transparent); overflow:hidden; } .bar i { display:block; height:100%; background:var(--up); transition: width .4s; }
-.kv { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:8px 14px; } .kv div{display:flex;flex-direction:column;min-width:0} .kv .k{font-size:12px;color:var(--muted)} .kv .v{font:600 16px var(--mono)}
-.form { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:8px; } label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); font-weight:600; }
-input { font:16px var(--mono); padding:9px; border-radius:10px; border:1px solid var(--line); background:var(--panel2); color:var(--fg); width:100%; min-width:0; }
-input:focus-visible { outline:2px solid var(--info); outline-offset:2px; }
-.verdict { font-weight:700; } .good{color:var(--up)} .bad{color:var(--down)}
-.spark { width:100%; height:70px; } .spark polyline { fill:none; stroke:var(--info); stroke-width:2; } .spark line { stroke:var(--flat); stroke-dasharray:4 4; }
-.status { font-size:12px; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 var(--sans); -webkit-font-smoothing:antialiased;
+  padding: calc(env(safe-area-inset-top,0px) + 10px) max(14px, env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 28px) max(14px, env(safe-area-inset-left,0px)); }
+.wrap { max-width:980px; margin:0 auto; display:grid; grid-template-columns:minmax(0,1fr); gap:12px; }
+@media (min-width: 820px) { .wrap { grid-template-columns: minmax(0,1.15fr) minmax(0,1fr); } .full { grid-column: 1 / -1; } }
+.num { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+header { display:flex; align-items:center; gap:12px; }
+.brand { display:flex; align-items:center; gap:10px; } .brand svg { width:30px; height:30px; } .brand b { font-size:18px; font-weight:800; letter-spacing:-.01em; }
+.live { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); font-weight:600; }
+.live i { width:8px; height:8px; border-radius:50%; background:var(--up); box-shadow:0 0 0 0 rgba(34,195,122,.6); animation:pulse 2s infinite; }
+.live.off i { background:var(--down); animation:none; }
+@keyframes pulse { 70% { box-shadow:0 0 0 8px rgba(34,195,122,0) } 100% { box-shadow:0 0 0 0 rgba(34,195,122,0) } }
+@media (prefers-reduced-motion: reduce) { .live i { animation:none } }
+.spacer{flex:1}
+.timer { text-align:right; } .timer .t { font:700 24px var(--mono); letter-spacing:.02em; } .timer .w { font-size:11.5px; color:var(--muted); }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:16px; display:flex; flex-direction:column; gap:12px; min-width:0; }
+.card h2 { margin:0; font-size:11.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); font-weight:700; }
+.card-h { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.call { position:relative; overflow:hidden; }
+.call .dir { font-size:34px; font-weight:800; letter-spacing:-.01em; line-height:1.05; }
+.call .sub { color:var(--muted); font-size:13.5px; }
+.call.up { border-color:color-mix(in srgb,var(--up) 50%,var(--line)); background:linear-gradient(180deg,var(--up-bg),transparent 70%),var(--panel); } .call.up .dir{color:var(--up)}
+.call.down { border-color:color-mix(in srgb,var(--down) 50%,var(--line)); background:linear-gradient(180deg,var(--down-bg),transparent 70%),var(--panel); } .call.down .dir{color:var(--down)}
+.call.flat .dir{color:var(--gold)}
+.probs { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.prob { background:var(--panel2); border-radius:12px; padding:10px 12px; } .prob .l { font-size:11.5px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
+.prob .v { font:700 26px var(--mono); } .prob.yes .v { color:var(--up) } .prob.no .v { color:var(--down) }
+.meter { height:8px; border-radius:99px; background:var(--down); overflow:hidden; display:flex; } .meter i { display:block; height:100%; background:var(--up); transition:width .5s; }
+.stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.stat .k { font-size:11.5px; color:var(--muted); } .stat .v { font:600 15px var(--mono); }
+.seg { display:inline-flex; background:var(--panel2); border-radius:10px; padding:3px; } .seg button { border:0; background:transparent; color:var(--muted); font:600 12.5px var(--sans); padding:6px 12px; border-radius:8px; }
+.seg button[aria-pressed="true"] { background:var(--panel); color:var(--fg); box-shadow:0 1px 0 rgba(0,0,0,.25); }
+.chart { width:100%; height:220px; display:block; } .chart text { fill:var(--faint); font:10px var(--mono); }
+.hist { display:grid; grid-template-columns:repeat(auto-fill,minmax(64px,1fr)); gap:6px; }
+.w { border-radius:10px; padding:7px 6px; text-align:center; background:var(--panel2); } .w .a { font-weight:800; font-size:15px; } .w .tm { font:500 10.5px var(--mono); color:var(--muted); } .w .ch { font:600 11px var(--mono); }
+.w.up { background:var(--up-bg); } .w.up .a, .w.up .ch { color:var(--up); } .w.down { background:var(--down-bg); } .w.down .a, .w.down .ch { color:var(--down); }
+.w.now { outline:1.5px dashed var(--faint); }
+.tbl { display:grid; grid-template-columns:auto 1fr 1fr; gap:6px 12px; align-items:center; } .tbl .h { font-size:11.5px; color:var(--muted); font-weight:600; }
+.tbl .c { font:600 16px var(--mono); } .good { color:var(--up) } .bad { color:var(--down) } .muted { color:var(--muted) } .small { font-size:12.5px; }
+.chip { font-size:12px; font-weight:700; padding:4px 10px; border-radius:99px; background:var(--panel2); color:var(--muted); } .chip.ok { background:var(--up-bg); color:var(--up) } .chip.warn { background:var(--gold-bg); color:var(--gold) }
+input { font:15px var(--mono); padding:9px 10px; border-radius:10px; border:1px solid var(--line); background:var(--panel2); color:var(--fg); width:100%; min-width:0; }
+.row { display:flex; gap:8px; } .row button, .btn { font:700 13.5px var(--sans); padding:9px 14px; border-radius:10px; border:1px solid var(--line); background:var(--panel2); color:var(--fg); white-space:nowrap; }
+button:focus-visible, input:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+details summary { cursor:pointer; color:var(--muted); font-size:13px; } details[open] summary { margin-bottom:8px; }
+.pats { display:grid; grid-template-columns: minmax(0,1fr) auto auto; gap:4px 12px; font-size:12.5px; align-items:center; }
+.pats .ph { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; font-weight:700; } .pats .nm { display:flex; gap:6px; align-items:center; }
+.pats .ic { font-weight:800; width:14px; text-align:center; } .pats .last { font-family:var(--mono); color:var(--muted); }
+.tb { display:grid; grid-template-columns: auto 1fr 1fr auto; gap:6px 12px; align-items:center; font-size:13.5px; }
+.tb .h { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-weight:700; } .tb .tf { font-weight:700; }
+.tb .u { color:var(--up); font-weight:700; } .tb .d { color:var(--down); font-weight:700; } .tb .acc { font:500 12px var(--mono); color:var(--muted); }
+.model .state { font-size:22px; font-weight:800; } .note { font-size:12.5px; color:var(--muted); line-height:1.55; }
 </style></head><body>
 <div class="wrap">
-  <div class="top"><h1>BTC live</h1><div class="spacer"></div><span class="muted small" id="winLbl">—</span><span class="clock" id="left">--:--</span></div>
-  <div class="card lean flat" id="leanCard" aria-live="polite">
-    <div class="word" id="word">LOADING</div>
-    <div class="pct" id="pct">—</div>
-    <div class="bar" aria-hidden="true"><i id="barI" style="width:50%"></i></div>
-    <div class="small muted" id="leanWhy">Chance BTC finishes this window ABOVE the strike (Kalshi “Yes”).</div>
-  </div>
-  <div class="card" id="hourCard"><h2>Hourly model (tested · Vest10 rules)</h2>
-    <div class="word" id="hWord" style="font-size:26px;font-weight:900">—</div>
-    <div class="kv">
-      <div><span class="k">Daily trend</span><span class="v" id="hTrend">—</span></div>
-      <div><span class="k">Last hourly signal</span><span class="v" id="hLast">—</span></div>
-      <div><span class="k">Entry</span><span class="v" id="hEntry">—</span></div>
-      <div><span class="k">Stop / target</span><span class="v" id="hST">—</span></div>
-      <div><span class="k">Move stop to entry at</span><span class="v" id="hBE">—</span></div>
-      <div><span class="k">Next check</span><span class="v" id="hNext">—</span></div>
+  <header class="full">
+    <div class="brand"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#12181d"/><path d="M14 42l12-12 9 8 15-17" stroke="#f0b429" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div><b>BTC Live</b><div class="live" id="live"><i></i><span id="liveTxt">connecting</span></div></div></div>
+    <div class="spacer"></div>
+    <div class="timer"><div class="t num" id="left">--:--</div><div class="w" id="winLbl">15-min window</div></div>
+  </header>
+
+  <section class="card call flat" id="callCard" aria-live="polite">
+    <div class="card-h"><h2>This 15-min window</h2><span class="chip" id="srcChip">strike: estimate</span></div>
+    <div class="dir" id="dir">Loading…</div>
+    <div class="sub" id="sub">Chance BTC finishes above the strike at the end of this window.</div>
+    <div class="probs"><div class="prob yes"><div class="l">Yes · above</div><div class="v" id="pYes">—</div></div><div class="prob no"><div class="l">No · below</div><div class="v" id="pNo">—</div></div></div>
+    <div class="meter" aria-hidden="true"><i id="meter" style="width:50%"></i></div>
+    <div class="stats">
+      <div class="stat"><div class="k">BTC</div><div class="v" id="px">—</div></div>
+      <div class="stat"><div class="k">Strike</div><div class="v" id="k">—</div></div>
+      <div class="stat"><div class="k">Distance</div><div class="v" id="dist">—</div></div>
+      <div class="stat"><div class="k">Move left (1σ)</div><div class="v" id="sig">—</div></div>
+      <div class="stat"><div class="k">Last 5 min</div><div class="v" id="mom">—</div></div>
+      <div class="stat"><div class="k">Window open</div><div class="v" id="wo">—</div></div>
     </div>
-    <div class="small muted" id="hWhy">Short only when the daily trend is down: an up hour followed by a solid down hour. Stop above both hours, target 2R, stop to entry at +0.5R, close after 48 h. Tested: ~70% won, about +0.07R per trade after costs (2025–26). Longs are off (untested).</div>
-  </div>
-  <div class="card"><h2>Live</h2>
-    <div class="kv">
-      <div><span class="k">BTC now (Coinbase)</span><span class="v" id="px">—</span></div>
-      <div><span class="k">Strike / target</span><span class="v" id="k">—</span></div>
-      <div><span class="k">Distance</span><span class="v" id="dist">—</span></div>
-      <div><span class="k">Typical move left</span><span class="v" id="sig">—</span></div>
-      <div><span class="k">Last 5 min</span><span class="v" id="mom">—</span></div>
-      <div><span class="k">Strike source</span><span class="v small" id="ksrc">—</span></div>
+  </section>
+
+  <section class="card" id="patCard">
+    <div class="card-h"><h2>Pattern alert · paper-tracked</h2><span class="chip" id="paChip">watching</span></div>
+    <div class="state" id="paWord" style="font-size:22px;font-weight:800">No alert</div>
+    <div class="stats">
+      <div class="stat"><div class="k">1-min order flow</div><div class="v" id="paFlow">—</div></div>
+      <div class="stat"><div class="k">Volatility vs normal</div><div class="v" id="paVol">—</div></div>
+      <div class="stat"><div class="k">Alerts tracked here</div><div class="v" id="paRec">—</div></div>
     </div>
-    <svg class="spark" id="spark" viewBox="0 0 300 70" preserveAspectRatio="none" role="img" aria-label="BTC price this window vs the strike"></svg>
-  </div>
-  <div class="card"><h2>Price check vs Kalshi</h2>
-    <div class="form">
-      <label for="iK">Strike (from Kalshi)<input id="iK" inputmode="decimal" placeholder="auto"></label>
-      <label for="iYes">Yes ask (¢)<input id="iYes" inputmode="numeric" placeholder="e.g. 62"></label>
-      <label for="iNo">No ask (¢)<input id="iNo" inputmode="numeric" placeholder="e.g. 40"></label>
+    <div class="note">Fires when sellers dominate the last minute (taker flow below −30%) while BTC is moving fast (15-min volatility > 1.5× the hour's). Kalshi's price is based on distance to the strike and tends to underprice the follow-through: on real Kalshi data, buying <b>No</b> here made +7.9¢ per contract (83 windows, 61% won; held on unseen windows). The mirror (buying surge → Yes) did <b>not</b> work. Small sample from Aug–Sep 2026 and one of 252 patterns searched, so it's tracked here before trusting it.</div>
+  </section>
+  <section class="card">
+    <div class="card-h"><h2>Kalshi · live prices</h2><span class="chip" id="kChip">not connected</span></div>
+    <div class="tbl">
+      <span></span><span class="h">Kalshi ask</span><span class="h">vs fair (after fee)</span>
+      <span class="h">Yes</span><span class="c" id="kYes">—</span><span class="c" id="eYes">—</span>
+      <span class="h">No</span><span class="c" id="kNo">—</span><span class="c" id="eNo">—</span>
     </div>
-    <div class="verdict" id="verdict">Type Kalshi's Yes or No price to see if it's cheap or expensive vs this estimate.</div>
-    <div class="small muted" id="kalshiLive"></div>
-  </div>
-  <div class="card small muted">
-    <h2>Read this</h2>
-    <p style="margin:0">This estimate uses BTC's distance from the strike, its volatility over the last hour and the time left. In our 4-year test, <b>Kalshi's own price was the better predictor</b> (65% vs 62% winners) and trading the gaps lost ~1¢ per contract after fees. Use it to see the lean and avoid overpaying, not as a guaranteed edge. Kalshi settles on the CF Benchmarks BTC index; Coinbase is a close proxy, so tiny gaps near the strike can go either way.</p>
-  </div>
-  <div class="status muted" id="status">Connecting…</div>
+    <div class="small muted" id="kMeta">—</div>
+    <details id="kSetup"><summary>Prices not loading? Connect Kalshi (one-time)</summary>
+      <p class="note">Kalshi may block browser requests. Deploy the free relay in <b>kalshi/worker.js</b> (Cloudflare Workers → Create → paste → Deploy; 2 minutes), then paste its address here.</p>
+      <div class="row"><input id="proxy" placeholder="https://your-relay.workers.dev" autocomplete="off"><button id="saveProxy">Save</button></div>
+      <p class="note">Or type the prices from the Kalshi app:</p>
+      <div class="row"><input id="mK" inputmode="decimal" placeholder="Strike"><input id="mYes" inputmode="numeric" placeholder="Yes ¢"><input id="mNo" inputmode="numeric" placeholder="No ¢"></div>
+    </details>
+  </section>
+
+  <section class="card full">
+    <div class="card-h"><h2>Price · last hour</h2><div class="seg" role="group" aria-label="Chart type"><button id="cCandle" aria-pressed="true">Candles</button><button id="cLine" aria-pressed="false">Line</button></div></div>
+    <svg class="chart" id="chart" viewBox="0 0 600 220" preserveAspectRatio="none" role="img" aria-label="BTC 1-minute price, last hour, with the strike"></svg>
+    <div class="seg" role="group" aria-label="Patterns" style="align-self:flex-start"><button id="pOn" aria-pressed="true">Patterns on</button><button id="pOff" aria-pressed="false">Off</button></div>
+    <div class="small muted">1-minute candles (Coinbase). Gold dashed = strike · grey = window start · shaded bands = support (green) / resistance (red) · ▲ long idea · ▼ short idea.</div>
+    <div id="patList" class="pats"></div>
+    <div class="note">Tested on 1 year of BTC 1-minute data (~550,000 minutes): every pattern is right 46–52% of the time over the next 15 minutes and moves less than 1 basis point on average, against 4–10 bp of trading costs. Breakouts actually reverse more often than they follow through (46% right). Treat the markers as a map of where price is reacting, not as entry signals.</div>
+  </section>
+
+  <section class="card full">
+    <div class="card-h"><h2>Previous windows</h2><span class="small muted" id="histSum">—</span></div>
+    <div class="hist" id="hist"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-h"><h2>Trend board</h2><span class="small muted">tested 2023–26</span></div>
+    <div class="tb" id="tb"></div>
+    <div class="note">Direction of the last closed bar and of price vs its 20-bar average, per timeframe. Tested on 4 years of BTC: as next-bar calls these are right 44–55% of the time and flip between years, so read them as the backdrop, not as signals.</div>
+  </section>
+  <section class="card model">
+    <div class="card-h"><h2>Hourly model · not proven</h2><span class="chip" id="hTrend">—</span></div>
+    <div class="state" id="hWord">—</div>
+    <div class="stats">
+      <div class="stat"><div class="k">Last signal</div><div class="v" id="hLast">—</div></div>
+      <div class="stat"><div class="k">Entry</div><div class="v" id="hEntry">—</div></div>
+      <div class="stat"><div class="k">Stop / target</div><div class="v" id="hST">—</div></div>
+      <div class="stat"><div class="k">Move stop at</div><div class="v" id="hBE">—</div></div>
+      <div class="stat"><div class="k">Next check</div><div class="v" id="hNext">—</div></div>
+    </div>
+    <div class="note">Short only in a daily downtrend: an up hour, then a solid down hour. Stop above both hours, target 2R, stop to entry at +0.5R, close after 48 h. ⚠ 4-year check: wins ~65–73% of trades, but after costs it lost in 2023–24 (−0.04R) and 2025 (−0.06R); only 2026 was positive (+0.09R). Treat it as context, not a proven edge.</div>
+  </section>
+
+  <section class="card">
+    <h2>How to read this</h2>
+    <p class="note" style="margin:0">With Kalshi connected, the headline is Kalshi's own probability: in our tests it called the window right more often than any model we built (70% vs 67% at minute 5, 83% vs 80% at minute 11). Without it, the headline is our estimate: the chance BTC ends above the strike, from its distance to the strike, the last hour's volatility and the time left. In our 4-year test Kalshi's own price picked winners slightly better (65% vs 62%) and trading the gaps lost about 1¢ per contract after fees. Use it to read the lean at a glance and to avoid overpaying. "Expensive" means skip. Minute-by-minute momentum and order flow tested at 47–49%: no edge, so they're shown as context only. Kalshi settles on the CF Benchmarks index; Coinbase is a close proxy.</p>
+  </section>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
 const fmt = (x, d = 0) => x == null || isNaN(x) ? "—" : Number(x).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 const Phi = (z) => { const t = 1 / (1 + 0.2316419 * Math.abs(z)), d = 0.3989423 * Math.exp(-z * z / 2), p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274)))); return z > 0 ? 1 - p : p; };
-const fee = (p) => Math.ceil(7 * p * (1 - p)) / 100;     // Kalshi taker fee per contract ≈ 0.07·p·(1−p), rounded up to the cent
-let candles = [], last = null, kalshi = null, winStart = null, autoStrike = null;
-function windowNow() {                                      // Kalshi 15-min windows end on the quarter hour
-  const now = new Date(), q = 15 * 60 * 1000, start = new Date(Math.floor(now.getTime() / q) * q);
-  return { start, end: new Date(start.getTime() + q), now };
-}
+const fee = (p) => Math.ceil(7 * p * (1 - p)) / 100;
+const LS = { get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+let candles = [], last = null, K = null, Kauto = null, kalshi = null, prob = null, chartMode = LS.get("chart") || "candle", winKey = null;
+const Q = 15 * 60e3, win = () => { const n = Date.now(), s = Math.floor(n / Q) * Q; return { s, e: s + Q, n }; };
 async function getJSON(u) { const r = await fetch(u, { cache: "no-store" }); if (!r.ok) throw new Error(r.status); return r.json(); }
-async function loadCandles() {
-  const j = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60");
-  candles = j.map(c => ({ t: c[0] * 1000, l: c[1], h: c[2], o: c[3], c: c[4] })).sort((a, b) => a.t - b.t);
-}
+// ---------- data
 async function loadTicker() { const j = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/ticker"); last = +j.price; }
-async function loadKalshi() {                                // may be blocked from some networks/browsers; the page works without it
-  try {
-    const j = await getJSON("https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXBTC15M&status=open&limit=5");
-    const w = windowNow(); const m = (j.markets || []).find(x => Math.abs(new Date(x.close_time) - w.end) < 90000) || (j.markets || [])[0];
-    kalshi = m ? { strike: m.floor_strike ?? m.cap_strike, yesAsk: m.yes_ask, noAsk: m.no_ask, ticker: m.ticker, close: m.close_time } : null;
-  } catch (e) { kalshi = null; }
+async function loadCandles() { const j = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60"); candles = j.map(c => ({ t: c[0] * 1e3, l: c[1], h: c[2], o: c[3], c: c[4] })).sort((a, b) => a.t - b.t); }
+async function loadKalshi() {
+  const path = "/trade-api/v2/markets?series_ticker=KXBTC15M&status=open&limit=10", proxy = LS.get("kproxy").replace(/\/$/, "");
+  for (const base of [proxy, "https://api.elections.kalshi.com"].filter(Boolean)) {
+    try {
+      const j = await getJSON(base + path), w = win();
+      const ms = j.markets || []; const m = ms.find(x => Math.abs(Date.parse(x.close_time) - w.e) < 120e3) || ms.sort((a, b) => Date.parse(a.close_time) - Date.parse(b.close_time))[0];
+      if (!m) continue;
+      const c = (v, d) => v != null ? +v : d != null ? Math.round(+d * 100) : null;
+      kalshi = { ticker: m.ticker, strike: m.floor_strike ?? m.cap_strike ?? null, yesAsk: c(m.yes_ask, m.yes_ask_dollars), noAsk: c(m.no_ask, m.no_ask_dollars),
+                 yesBid: c(m.yes_bid, m.yes_bid_dollars), close: m.close_time, via: base === proxy ? "relay" : "direct", at: Date.now() };
+      return;
+    } catch (e) { /* try next */ }
+  }
+  if (kalshi && Date.now() - kalshi.at > 60e3) kalshi = null;
 }
-function sigmaPerMin() {
-  const c = candles.slice(-61); if (c.length < 20) return null;
-  const r = []; for (let i = 1; i < c.length; i++) r.push(Math.log(c[i].c / c[i - 1].c));
-  const m = r.reduce((a, b) => a + b, 0) / r.length; return Math.sqrt(r.reduce((a, b) => a + (b - m) ** 2, 0) / (r.length - 1));
-}
+function sigma() { const c = candles.slice(-61); if (c.length < 20) return null; const r = []; for (let i = 1; i < c.length; i++) r.push(Math.log(c[i].c / c[i - 1].c)); const m = r.reduce((a, b) => a + b, 0) / r.length; return Math.sqrt(r.reduce((a, b) => a + (b - m) ** 2, 0) / (r.length - 1)); }
+// ---------- render
 function render() {
-  const w = windowNow(), leftMs = w.end - w.now, minsLeft = Math.max(leftMs / 60000, 0.05);
-  $("left").textContent = `${String(Math.floor(leftMs / 60000)).padStart(2, "0")}:${String(Math.floor(leftMs / 1000) % 60).padStart(2, "0")}`;
-  $("winLbl").textContent = w.start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "–" + w.end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (+w.start !== +winStart) { winStart = w.start; autoStrike = null; $("iK").value = ""; $("iYes").value = ""; $("iNo").value = ""; }
-  const open = candles.find(c => c.t === +w.start); if (open && autoStrike == null) autoStrike = open.o;
-  const typed = parseFloat(($("iK").value || "").replace(/,/g, ""));
-  const K = !isNaN(typed) ? typed : (kalshi && kalshi.strike) ? kalshi.strike : autoStrike;
-  $("ksrc").textContent = !isNaN(typed) ? "typed" : (kalshi && kalshi.strike) ? "Kalshi (live)" : autoStrike ? "estimate: BTC at window open" : "—";
-  const s = sigmaPerMin(); if (!last || !K || !s) return;
-  const sdLeft = s * Math.sqrt(minsLeft), z = Math.log(last / K) / sdLeft, p = Phi(z);
-  $("px").textContent = "$" + fmt(last, 2); $("k").textContent = "$" + fmt(K, 2);
-  const d = last - K; $("dist").textContent = `${d >= 0 ? "+" : "−"}$${fmt(Math.abs(d), 0)} (${(z >= 0 ? "+" : "") + z.toFixed(2)} σ)`;
-  $("sig").textContent = "±$" + fmt(last * sdLeft, 0);
-  const c5 = candles.slice(-6); const mom = c5.length > 1 ? last - c5[0].o : null; $("mom").textContent = mom == null ? "—" : `${mom >= 0 ? "+" : "−"}$${fmt(Math.abs(mom), 0)}`;
-  const word = p >= 0.6 ? "LEANING UP" : p <= 0.4 ? "LEANING DOWN" : "COIN FLIP";
-  $("leanCard").className = "card lean " + (p >= 0.6 ? "up" : p <= 0.4 ? "down" : "flat");
-  $("word").textContent = word; $("pct").textContent = `Yes ${(p * 100).toFixed(0)}% · No ${(100 - p * 100).toFixed(0)}%`; $("barI").style.width = (p * 100).toFixed(1) + "%";
-  $("leanWhy").textContent = minsLeft < 1 ? "Under a minute left: price noise near the strike decides it." : `Fair Kalshi price ≈ Yes ${(p * 100).toFixed(0)}¢ / No ${(100 - p * 100).toFixed(0)}¢.`;
-  // price check
-  let yes = parseFloat($("iYes").value), no = parseFloat($("iNo").value);
-  if (kalshi && isNaN(yes) && kalshi.yesAsk) yes = kalshi.yesAsk; if (kalshi && isNaN(no) && kalshi.noAsk) no = kalshi.noAsk;
-  const msgs = [];
-  if (!isNaN(yes)) { const edge = p - yes / 100 - fee(yes / 100); msgs.push(`Yes at ${yes}¢: ${edge > 0.03 ? "cheaper than fair" : edge > 0 ? "about fair" : "expensive"} (${edge >= 0 ? "+" : ""}${(edge * 100).toFixed(1)}¢ after fee)`); }
-  if (!isNaN(no)) { const edge = (1 - p) - no / 100 - fee(no / 100); msgs.push(`No at ${no}¢: ${edge > 0.03 ? "cheaper than fair" : edge > 0 ? "about fair" : "expensive"} (${edge >= 0 ? "+" : ""}${(edge * 100).toFixed(1)}¢ after fee)`); }
-  if (msgs.length) $("verdict").innerHTML = msgs.map(m => `<div class="${/cheaper/.test(m) ? "good" : /expensive/.test(m) ? "bad" : ""}"></div>`).join("");
-  if (msgs.length) [...$("verdict").children].forEach((el, i) => el.textContent = msgs[i]);
-  $("kalshiLive").textContent = kalshi ? `Kalshi live: ${kalshi.ticker} · Yes ask ${kalshi.yesAsk ?? "—"}¢ · No ask ${kalshi.noAsk ?? "—"}¢` : "Kalshi live data not available here: type the strike and prices from the Kalshi app.";
-  // sparkline of this window vs strike
-  const win = candles.filter(c => c.t >= +w.start); const pts = win.map(c => c.c).concat([last]);
-  if (pts.length > 1) {
-    const lo = Math.min(...pts, K), hi = Math.max(...pts, K), X = i => (i / 15) * 300, Y = v => 66 - (v - lo) / ((hi - lo) || 1) * 62;
-    $("spark").innerHTML = `<line x1="0" x2="300" y1="${Y(K)}" y2="${Y(K)}"/><polyline points="${pts.map((v, i) => X(i) + "," + Y(v)).join(" ")}"/>`;
+  const w = win(), left = w.e - w.n, minsLeft = Math.max(left / 60e3, 0.05);
+  $("left").textContent = `${String(Math.floor(left / 60e3)).padStart(2, "0")}:${String(Math.floor(left / 1e3) % 60).padStart(2, "0")}`;
+  const tf = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); $("winLbl").textContent = `${tf(w.s)} – ${tf(w.e)}`;
+  if (winKey !== w.s) { winKey = w.s; Kauto = null; ["mK", "mYes", "mNo"].forEach(id => $(id).value = ""); }
+  const o = candles.find(c => c.t === w.s); if (o && Kauto == null) Kauto = o.o;
+  const typed = parseFloat(($("mK").value || "").replace(/,/g, ""));
+  K = !isNaN(typed) ? typed : (kalshi && kalshi.strike) ? +kalshi.strike : Kauto;
+  $("srcChip").textContent = !isNaN(typed) ? "strike: typed" : (kalshi && kalshi.strike) ? "strike: Kalshi" : "strike: estimate";
+  $("srcChip").className = "chip " + ((kalshi && kalshi.strike) || !isNaN(typed) ? "ok" : "warn");
+  const s = sigma();
+  if (last && K && s) {
+    const sd = s * Math.sqrt(minsLeft), z = Math.log(last / K) / sd; prob = Phi(z);
+    const km = kalshi && kalshi.yesAsk != null && kalshi.yesBid != null ? (kalshi.yesAsk + kalshi.yesBid) / 200 : null; const head = km ?? prob;
+    const dirTxt = head >= 0.6 ? "Leaning up" : head <= 0.4 ? "Leaning down" : "Coin flip";
+    $("callCard").className = "card call " + (head >= 0.6 ? "up" : head <= 0.4 ? "down" : "flat"); $("dir").textContent = dirTxt;
+    $("sub").textContent = km != null ? `Kalshi market: Yes ${Math.round(km * 100)}% (best predictor in our tests) · our estimate ${Math.round(prob * 100)}%` : (minsLeft < 1 ? "Under a minute left: noise near the strike decides it." : `Our estimate (connect Kalshi for the market's own, more accurate number) · fair Yes ${Math.round(prob * 100)}¢`);
+    $("pYes").textContent = Math.round(head * 100) + "%"; $("pNo").textContent = Math.round(100 - head * 100) + "%"; $("meter").style.width = (head * 100).toFixed(1) + "%";
+    $("px").textContent = "$" + fmt(last, 0); $("k").textContent = "$" + fmt(K, 0); const d = last - K;
+    $("dist").textContent = `${d >= 0 ? "+" : "−"}${fmt(Math.abs(d), 0)}`; $("dist").className = "v " + (d >= 0 ? "good" : "bad");
+    $("sig").textContent = "±" + fmt(last * sd, 0);
+    const c5 = candles.slice(-5); const mo = c5.length ? last - c5[0].o : null; $("mom").textContent = mo == null ? "—" : `${mo >= 0 ? "+" : "−"}${fmt(Math.abs(mo), 0)}`; $("mom").className = "v " + (mo >= 0 ? "good" : "bad");
+    $("wo").textContent = Kauto ? "$" + fmt(Kauto, 0) : "—";
   }
+  renderKalshi(); renderChart(); renderHist();
 }
-async function tick() {
-  try { await loadTicker(); $("status").textContent = "Live · updated " + new Date().toLocaleTimeString(); }
-  catch (e) { $("status").textContent = "Can't reach Coinbase right now; retrying…"; }
-  render();
+function verdict(p, ask) { if (ask == null || isNaN(ask) || p == null) return ["—", ""]; const e = p - ask / 100 - fee(ask / 100); return [`${e >= 0 ? "+" : ""}${(e * 100).toFixed(1)}¢ ${e > 0.03 ? "cheap" : e > 0 ? "fair" : "expensive"}`, e > 0.03 ? "c good" : e > 0 ? "c" : "c bad"]; }
+function renderKalshi() {
+  let yes = kalshi?.yesAsk, no = kalshi?.noAsk; const my = parseFloat($("mYes").value), mn = parseFloat($("mNo").value);
+  if (!isNaN(my)) yes = my; if (!isNaN(mn)) no = mn;
+  $("kYes").textContent = yes == null || isNaN(yes) ? "—" : yes + "¢"; $("kNo").textContent = no == null || isNaN(no) ? "—" : no + "¢";
+  const [vy, cy] = verdict(prob, yes), [vn, cn] = verdict(prob == null ? null : 1 - prob, no);
+  $("eYes").textContent = vy; $("eYes").className = cy || "c"; $("eNo").textContent = vn; $("eNo").className = cn || "c";
+  if (kalshi) { $("kChip").textContent = "live · " + kalshi.via; $("kChip").className = "chip ok"; $("kMeta").textContent = `${kalshi.ticker} · strike $${fmt(kalshi.strike, 2)} · closes ${new Date(kalshi.close).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · updated ${new Date(kalshi.at).toLocaleTimeString()}`; }
+  else { $("kChip").textContent = (!isNaN(my) || !isNaN(mn)) ? "typed" : "not connected"; $("kChip").className = "chip " + ((!isNaN(my) || !isNaN(mn)) ? "ok" : "warn"); $("kMeta").textContent = "Kalshi didn't answer from this browser. Connect the relay below, or type prices from the Kalshi app."; }
 }
-async function slow() { try { await loadCandles(); } catch (e) {} await loadKalshi(); render(); }
-["iK", "iYes", "iNo"].forEach(id => $(id).addEventListener("input", render));
+function renderChart() {
+  const svg = $("chart"), c = candles.slice(-60); if (c.length < 5) return;
+  const W = 600, H = 220, P = { l: 6, r: 52, t: 10, b: 18 }, hi = Math.max(...c.map(x => x.h), K || -Infinity), lo = Math.min(...c.map(x => x.l), K || Infinity), pad = (hi - lo) * 0.06 || 1;
+  const Y = v => P.t + (hi + pad - v) / ((hi - lo) + 2 * pad) * (H - P.t - P.b), step = (W - P.l - P.r) / c.length, X = i => P.l + i * step + step / 2;
+  let g = ""; const ticks = 4; for (let k = 0; k <= ticks; k++) { const v = lo + (hi - lo) * k / ticks; g += `<line x1="${P.l}" x2="${W - P.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width=".6"/><text x="${W - P.r + 6}" y="${Y(v) + 3}">${fmt(v, 0)}</text>`; }
+  const w = win(), ws = c.findIndex(x => x.t === w.s); if (ws >= 0) g += `<line x1="${X(ws) - step / 2}" x2="${X(ws) - step / 2}" y1="${P.t}" y2="${H - P.b}" stroke="var(--faint)" stroke-width="1"/><text x="${X(ws) - step / 2 + 3}" y="${H - 5}">window</text>`;
+  if (chartMode === "candle") {
+    c.forEach((x, i) => { const up = x.c >= x.o, col = up ? "var(--up)" : "var(--down)", bw = Math.max(step * 0.62, 1.5);
+      g += `<line x1="${X(i)}" x2="${X(i)}" y1="${Y(x.h)}" y2="${Y(x.l)}" stroke="${col}" stroke-width="1"/><rect x="${X(i) - bw / 2}" y="${Y(Math.max(x.o, x.c))}" width="${bw}" height="${Math.max(Math.abs(Y(x.o) - Y(x.c)), 1)}" fill="${col}"/>`; });
+  } else { g += `<polyline points="${c.map((x, i) => X(i) + "," + Y(x.c)).join(" ")}" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linejoin="round"/>`; }
+  if (showPat) {
+    const F = findPatterns(candles.slice(-110)); const off = Math.max(0, candles.slice(-110).length - 60); pats = F.out.map(x => ({ ...x, i: x.i - off })).filter(x => x.i >= 0); levels = F;
+    F.sup.forEach(v => { if (v > lo - pad && v < hi + pad) g = `<rect x="${P.l}" y="${Y(v) - 3}" width="${W - P.r - P.l}" height="6" fill="var(--up)" opacity=".14"/>` + g; });
+    F.res.forEach(v => { if (v > lo - pad && v < hi + pad) g = `<rect x="${P.l}" y="${Y(v) - 3}" width="${W - P.r - P.l}" height="6" fill="var(--down)" opacity=".14"/>` + g; });
+    pats.forEach(p => { const x = c[p.i]; if (!x) return; const up = PAT[p.k][1] > 0;
+      g += `<text x="${X(p.i)}" y="${up ? Y(x.l) + 12 : Y(x.h) - 4}" text-anchor="middle" style="fill:${up ? "var(--up)" : "var(--down)"};font-size:11px;font-weight:800">${up ? "▲" : "▼"}<title>${PAT[p.k][0]}</title></text>`; });
+    renderPatList();
+  }
+  if (K) g += `<line x1="${P.l}" x2="${W - P.r}" y1="${Y(K)}" y2="${Y(K)}" stroke="var(--gold)" stroke-width="1.2" stroke-dasharray="5 4"/><text x="${W - P.r + 6}" y="${Y(K) + 3}" style="fill:var(--gold);font-weight:700">${fmt(K, 0)}</text>`;
+  if (last) g += `<circle cx="${X(c.length - 1)}" cy="${Y(last)}" r="3.5" fill="var(--fg)"/>`;
+  svg.innerHTML = g;
+}
+function renderHist() {
+  const w = win(), out = [];
+  for (let k = 12; k >= 0; k--) {
+    const s = w.s - k * Q, e = s + Q, inW = candles.filter(x => x.t >= s && x.t < e); if (!inW.length) continue;
+    const open = inW[0].o, close = k === 0 ? (last || inW[inW.length - 1].c) : inW[inW.length - 1].c, ch = close - open, up = ch >= 0;
+    out.push({ s, up, ch, now: k === 0 });
+  }
+  const done = out.filter(x => !x.now), ups = done.filter(x => x.up).length;
+  $("histSum").textContent = done.length ? `${ups} up · ${done.length - ups} down (last ${done.length})` : "—";
+  $("hist").innerHTML = out.map(x => `<div class="w ${x.up ? "up" : "down"} ${x.now ? "now" : ""}"><div class="tm">${new Date(x.s).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div><div class="a">${x.up ? "▲" : "▼"}</div><div class="ch">${x.ch >= 0 ? "+" : "−"}${fmt(Math.abs(x.ch), 0)}</div></div>`).join("");
+}
 
-// ---------- hourly model (Vest10 rules) ----------
-let H = [], Dd = [];
-async function loadHourly() {
+// ---------- chart patterns (same rules as .scripts/btc_patterns_1m.py; hit rates measured on 1 year of BTC 1-min data)
+const PAT = { // code: [name, side, tested "right next 15 min", avg bp]
+  SB: ["Support bounce", 1, 0.517, 0.21], RR: ["Resistance rejection", -1, 0.523, 0.4], BO: ["Breakout up", 1, 0.456, -0.56], BD: ["Breakdown", -1, 0.469, -0.06],
+  BE: ["Bullish engulfing", 1, 0.491, -0.05], SE: ["Bearish engulfing", -1, 0.498, 0.3], TU: ["Trend pullback up", 1, 0.478, -0.16], TD: ["Trend pullback down", -1, 0.49, 0.3] };
+let showPat = LS.get("pat") !== "off", pats = [], levels = { sup: [], res: [] };
+function ema(arr, n) { const k = 2 / (n + 1); const out = []; arr.forEach((v, i) => out.push(i ? v * k + out[i - 1] * (1 - k) : v)); return out; }
+function findPatterns(c) {
+  const out = [], tol = 0.0005, n = c.length; if (n < 30) return { out, sup: [], res: [] };
+  const cl = c.map(x => x.c), e20 = ema(cl, 20), e50 = ema(cl, 50);
+  const ph = i => i >= 2 && i < n - 2 && c[i].h >= Math.max(c[i - 2].h, c[i - 1].h, c[i + 1].h, c[i + 2].h);
+  const pl = i => i >= 2 && i < n - 2 && c[i].l <= Math.min(c[i - 2].l, c[i - 1].l, c[i + 1].l, c[i + 2].l);
+  const lv = (i) => { const hs = [], ls = []; for (let j = Math.max(2, i - 60); j < i - 2; j++) { if (ph(j)) hs.push(c[j].h); if (pl(j)) ls.push(c[j].l); }
+    return { res: hs.filter(h => hs.filter(x => Math.abs(x - h) / h <= tol).length >= 2), sup: ls.filter(l => ls.filter(x => Math.abs(x - l) / l <= tol).length >= 2) }; };
+  let lastLv = { sup: [], res: [] };
+  for (let i = Math.max(1, n - 60); i < n; i++) {
+    const L = lv(i), x = c[i], p = c[i - 1]; lastLv = L;
+    if (L.res.length) { const r = Math.max(...L.res); if (x.h >= r * (1 - tol) && x.c < r) out.push({ i, k: "RR" }); if (x.c > r * (1 + tol) && p.c <= r * (1 + tol)) out.push({ i, k: "BO" }); }
+    if (L.sup.length) { const s = Math.min(...L.sup); if (x.l <= s * (1 + tol) && x.c > s) out.push({ i, k: "SB" }); if (x.c < s * (1 - tol) && p.c >= s * (1 - tol)) out.push({ i, k: "BD" }); }
+    if (p.c < p.o && x.c > x.o && x.c >= p.o && x.o <= p.c) out.push({ i, k: "BE" });
+    if (p.c > p.o && x.c < x.o && x.c <= p.o && x.o >= p.c) out.push({ i, k: "SE" });
+    if (e20[i] > e50[i] && x.l <= e20[i] && x.c > e20[i]) out.push({ i, k: "TU" });
+    if (e20[i] < e50[i] && x.h >= e20[i] && x.c < e20[i]) out.push({ i, k: "TD" });
+  }
+  return { out, sup: [...new Set(lastLv.sup.map(v => Math.round(v)))], res: [...new Set(lastLv.res.map(v => Math.round(v)))] };
+}
+function renderPatList() {
+  const latest = {}; pats.forEach(p => latest[p.k] = p);
+  $("patList").innerHTML = `<span class="ph">Pattern</span><span class="ph">Tested: right / 15 min</span><span class="ph">Last seen</span>` + Object.entries(PAT).map(([k, v]) => {
+    const l = latest[k], when = l ? new Date(candles.slice(-60)[l.i]?.t || 0).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "—";
+    const hr = v[2] == null ? "—" : `${Math.round(v[2] * 100)}% · ${v[3] >= 0 ? "+" : ""}${v[3]} bp`;
+    return `<span class="nm"><span class="ic" style="color:${v[1] > 0 ? "var(--up)" : "var(--down)"}">${v[1] > 0 ? "▲" : "▼"}</span>${v[0]}</span><span class="num ${v[2] != null && v[2] >= 0.53 ? "good" : "muted"}">${hr}</span><span class="last">${when}</span>`; }).join("");
+}
+
+
+// ---------- trend board (4h / 6h / 12h / daily)
+const TB_ACC = { "4h": "45–50%", "6h": "47–51%", "12h": "46–53%", "1D": "46–51%" };
+let TBD = {};
+async function loadBoard() {
   try {
-    const h = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600");
-    const d = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400");
-    H = h.map(c => ({ t: c[0] * 1000, l: c[1], h: c[2], o: c[3], c: c[4] })).sort((a, b) => a.t - b.t);
-    Dd = d.map(c => ({ t: c[0] * 1000, c: c[4] })).sort((a, b) => a.t - b.t);
+    const h1 = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600"), h6 = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=21600"),
+          d1 = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400");
+    const mk = a => a.map(c => ({ t: c[0] * 1e3, o: c[3], c: c[4] })).sort((x, y) => x.t - y.t);
+    const group = (bars, ms) => { const m = new Map(); bars.forEach(b => { const k = Math.floor(b.t / ms) * ms; if (!m.has(k)) m.set(k, { t: k, o: b.o, c: b.c }); else m.get(k).c = b.c; }); return [...m.values()]; };
+    const H1 = mk(h1), H6 = mk(h6); TBD = { "4h": group(H1, 4 * 3600e3), "6h": H6, "12h": group(H6, 12 * 3600e3), "1D": mk(d1) };
   } catch (e) {}
-  renderHourly();
+  renderBoard();
 }
-function renderHourly() {
-  if (H.length < 5 || Dd.length < 25) return;
-  const now = Date.now(); const closedH = H.filter(c => c.t + 3600e3 <= now); const closedD = Dd.filter(c => c.t + 86400e3 <= now);
-  const trendAt = (t) => { const ds = closedD.filter(c => c.t + 86400e3 <= t); if (ds.length < 21) return 0; let e = ds[0].c; const k = 2 / 21;
-    for (const x of ds.slice(1, -1)) e = x.c * k + e * (1 - k); return ds[ds.length - 1].c < e ? -1 : 1; };
-  const tr = trendAt(now); $("hTrend").textContent = tr === -1 ? "DOWN (shorts on)" : "UP (model off)";
-  // scan the last 48 closed hours for signals; take the latest one and follow it
-  let sig = null;
-  for (let i = Math.max(1, closedH.length - 48); i < closedH.length; i++) {
-    const p = closedH[i - 1], c = closedH[i];
-    if (trendAt(c.t + 3600e3) === -1 && p.c > p.o && c.c < c.o && (c.o - c.c) > 0.5 * (c.h - c.l)) {
-      const stop = Math.max(p.h, c.h); if ((stop - c.c) / c.c >= 0.004) sig = { t: c.t + 3600e3, e: c.c, stop, i };
-    }
+function renderBoard() {
+  const now = Date.now(), dur = { "4h": 4 * 3600e3, "6h": 6 * 3600e3, "12h": 12 * 3600e3, "1D": 86400e3 };
+  let html = `<span class="h">Bar</span><span class="h">Last bar</span><span class="h">vs 20-bar avg</span><span class="h">Tested right</span>`;
+  for (const k of ["4h", "6h", "12h", "1D"]) {
+    const bars = (TBD[k] || []).filter(b => b.t + dur[k] <= now); if (bars.length < 21) { html += `<span class="tf">${k}</span><span>—</span><span>—</span><span class="acc">${TB_ACC[k]}</span>`; continue; }
+    const lb = bars[bars.length - 1], e = ema(bars.map(b => b.c), 20).pop(), up1 = lb.c >= lb.o, up2 = lb.c >= e;
+    html += `<span class="tf">${k === "1D" ? "Daily" : k}</span><span class="${up1 ? "u" : "d"}">${up1 ? "▲ up" : "▼ down"}</span><span class="${up2 ? "u" : "d"}">${up2 ? "▲ above" : "▼ below"}</span><span class="acc">${TB_ACC[k]}</span>`;
   }
-  const nextH = new Date(Math.ceil(now / 3600e3) * 3600e3); $("hNext").textContent = nextH.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (!sig) { $("hWord").textContent = tr === -1 ? "NO SIGNAL · WAIT" : "OFF · DAILY TREND UP"; $("hWord").style.color = "var(--muted)"; ["hLast", "hEntry", "hST", "hBE"].forEach(id => $(id).textContent = "—"); return; }
-  const r = sig.stop - sig.e, tgt = sig.e - 2 * r, be = sig.e - 0.5 * r; let state = "OPEN", stopNow = sig.stop;
-  for (const c of H.filter(x => x.t >= sig.t)) {
-    if (c.h >= stopNow) { state = stopNow < sig.e ? "CLOSED +0.1R (stop at entry)" : "STOPPED −1R"; break; }
-    if (c.l <= tgt) { state = "TARGET HIT +2R"; break; }
-    if (c.l <= be) stopNow = Math.min(stopNow, sig.e - 0.1 * r);
-  }
-  if (state === "OPEN" && last) { if (last >= stopNow) state = stopNow < sig.e ? "CLOSED +0.1R (stop at entry)" : "STOPPED −1R"; else if (last <= tgt) state = "TARGET HIT +2R"; }
-  if (state === "OPEN" && now - sig.t > 48 * 3600e3) state = "CLOSED (48 h)";
-  const open = state === "OPEN", fresh = now - sig.t < 3600e3;
-  $("hWord").textContent = open ? (fresh ? "SHORT SIGNAL (new)" : "SHORT ACTIVE") : "LAST SIGNAL " + state; $("hWord").style.color = open ? "var(--down)" : "var(--muted)";
-  $("hLast").textContent = new Date(sig.t).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
-  $("hEntry").textContent = "$" + fmt(sig.e, 0); $("hST").textContent = `$${fmt(stopNow, 0)} / $${fmt(tgt, 0)}`; $("hBE").textContent = stopNow < sig.e ? "done" : "$" + fmt(be, 0);
-  if (open && fresh && !window._buzzed) { window._buzzed = sig.t; try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {} }
+  $("tb").innerHTML = html;
 }
-loadHourly(); setInterval(loadHourly, 60000); setInterval(renderHourly, 5000);
+loadBoard(); setInterval(loadBoard, 120000);
 
-slow(); tick(); setInterval(tick, 3000); setInterval(slow, 20000); setInterval(render, 1000);
+
+// ---------- pattern alert: selling surge in a fast market → lean No (paper-tracked)
+let flow1 = null, volr = null;
+async function loadFlow() {
+  try {
+    const tr = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/trades?limit=1000");
+    const cut = Date.now() - 60e3; let tb = 0, ts = 0;
+    for (const x of tr) { if (Date.parse(x.time) < cut) continue; const v = +x.size; if (x.side === "sell") tb += v; else ts += v; }   // Coinbase 'side' = maker side → taker buy when side is "sell"
+    flow1 = (tb + ts) > 0 ? (tb - ts) / (tb + ts) : null;
+  } catch (e) { flow1 = null; }
+  const c = candles.slice(-61);
+  if (c.length > 30) { const r = []; for (let i = 1; i < c.length; i++) r.push(Math.log(c[i].c / c[i - 1].c)); const sd = a => { const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / (a.length - 1)); }; volr = sd(r.slice(-15)) / sd(r); }
+  renderAlert();
+}
+function paLog() { try { return JSON.parse(LS.get("paLog") || "[]"); } catch (e) { return []; } }
+function renderAlert() {
+  $("paFlow").textContent = flow1 == null ? "—" : `${flow1 >= 0 ? "+" : ""}${Math.round(flow1 * 100)}%`; $("paFlow").className = "v " + (flow1 == null ? "" : flow1 >= 0 ? "good" : "bad");
+  $("paVol").textContent = volr == null ? "—" : volr.toFixed(2) + "×";
+  const w = win(), mins = (Date.now() - w.s) / 60e3, fire = flow1 != null && volr != null && flow1 < -0.3 && volr > 1.5 && mins >= 1 && mins <= 14;
+  let log = paLog();
+  if (fire && !log.some(x => x.s === w.s)) { log.push({ s: w.s, k: K, at: Date.now(), noAsk: kalshi?.noAsk ?? null }); try { navigator.vibrate && navigator.vibrate([150, 80, 150]); } catch (e) {} }
+  log.forEach(x => { if (x.res == null && Date.now() > x.s + Q + 60e3) { const lc = candles.filter(c => c.t >= x.s && c.t < x.s + Q).pop(); if (lc && x.k) x.res = lc.c < x.k ? "No won" : "Yes won"; } });
+  LS.set("paLog", JSON.stringify(log.slice(-200)));
+  const cur = log.find(x => x.s === w.s);
+  $("paWord").textContent = cur ? "Selling surge → lean NO" : "No alert"; $("paWord").style.color = cur ? "var(--down)" : "var(--muted)";
+  $("paChip").textContent = cur ? "ALERT this window" : "watching"; $("paChip").className = "chip " + (cur ? "warn" : "");
+  const done = log.filter(x => x.res), won = done.filter(x => x.res === "No won").length;
+  $("paRec").textContent = done.length ? `${won}/${done.length} No won` : "none yet";
+}
+loadFlow(); setInterval(loadFlow, 10000);
+
+// ---------- hourly model (Vest10 rules)
+let H = [], Dd = [];
+async function loadHourly() { try { const h = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600"), d = await getJSON("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400");
+  H = h.map(c => ({ t: c[0] * 1e3, l: c[1], h: c[2], o: c[3], c: c[4] })).sort((a, b) => a.t - b.t); Dd = d.map(c => ({ t: c[0] * 1e3, c: c[4] })).sort((a, b) => a.t - b.t); } catch (e) {} renderHourly(); }
+function renderHourly() {
+  if (H.length < 5 || Dd.length < 25) return; const now = Date.now(), cH = H.filter(c => c.t + 3600e3 <= now), cD = Dd.filter(c => c.t + 86400e3 <= now);
+  const trendAt = (t) => { const ds = cD.filter(c => c.t + 86400e3 <= t); if (ds.length < 21) return 0; let e = ds[0].c; const k = 2 / 21; for (const x of ds.slice(1, -1)) e = x.c * k + e * (1 - k); return ds[ds.length - 1].c < e ? -1 : 1; };
+  const tr = trendAt(now); $("hTrend").textContent = tr === -1 ? "daily trend down · shorts on" : "daily trend up · off"; $("hTrend").className = "chip " + (tr === -1 ? "warn" : "");
+  let sig = null; for (let i = Math.max(1, cH.length - 48); i < cH.length; i++) { const p = cH[i - 1], c = cH[i];
+    if (trendAt(c.t + 3600e3) === -1 && p.c > p.o && c.c < c.o && (c.o - c.c) > 0.5 * (c.h - c.l)) { const stop = Math.max(p.h, c.h); if ((stop - c.c) / c.c >= 0.004) sig = { t: c.t + 3600e3, e: c.c, stop }; } }
+  $("hNext").textContent = new Date(Math.ceil(now / 3600e3) * 3600e3).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (!sig) { $("hWord").textContent = tr === -1 ? "No signal · waiting" : "Off"; $("hWord").style.color = "var(--muted)"; ["hLast", "hEntry", "hST", "hBE"].forEach(id => $(id).textContent = "—"); return; }
+  const r = sig.stop - sig.e, tgt = sig.e - 2 * r, be = sig.e - 0.5 * r; let st = "OPEN", sn = sig.stop;
+  for (const c of H.filter(x => x.t >= sig.t)) { if (c.h >= sn) { st = sn < sig.e ? "Closed · +0.1R" : "Stopped · −1R"; break; } if (c.l <= tgt) { st = "Target hit · +2R"; break; } if (c.l <= be) sn = Math.min(sn, sig.e - 0.1 * r); }
+  if (st === "OPEN" && last) { if (last >= sn) st = sn < sig.e ? "Closed · +0.1R" : "Stopped · −1R"; else if (last <= tgt) st = "Target hit · +2R"; }
+  if (st === "OPEN" && now - sig.t > 48 * 3600e3) st = "Closed · 48 h";
+  const open = st === "OPEN"; $("hWord").textContent = open ? (now - sig.t < 3600e3 ? "SHORT signal · new" : "SHORT active") : "Last signal: " + st; $("hWord").style.color = open ? "var(--down)" : "var(--muted)";
+  $("hLast").textContent = new Date(sig.t).toLocaleString([], { weekday: "short", hour: "numeric" }); $("hEntry").textContent = fmt(sig.e, 0); $("hST").textContent = `${fmt(sn, 0)} / ${fmt(tgt, 0)}`; $("hBE").textContent = sn < sig.e ? "done" : fmt(be, 0);
+  if (open && now - sig.t < 3600e3 && window._buzz !== sig.t) { window._buzz = sig.t; try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {} }
+}
+// ---------- wiring
+function setMode(m) { chartMode = m; LS.set("chart", m); $("cCandle").setAttribute("aria-pressed", m === "candle"); $("cLine").setAttribute("aria-pressed", m === "line"); renderChart(); }
+function setPat(on) { showPat = on; LS.set("pat", on ? "on" : "off"); $("pOn").setAttribute("aria-pressed", on); $("pOff").setAttribute("aria-pressed", !on); $("patList").hidden = !on; renderChart(); }
+$("pOn").onclick = () => setPat(true); $("pOff").onclick = () => setPat(false); setPat(showPat);
+$("cCandle").onclick = () => setMode("candle"); $("cLine").onclick = () => setMode("line"); setMode(chartMode);
+$("proxy").value = LS.get("kproxy"); $("saveProxy").onclick = () => { LS.set("kproxy", $("proxy").value.trim()); loadKalshi().then(render); };
+["mK", "mYes", "mNo"].forEach(id => $(id).addEventListener("input", render));
+async function fast() { try { await loadTicker(); $("live").className = "live"; $("liveTxt").textContent = "live · " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }); }
+  catch (e) { $("live").className = "live off"; $("liveTxt").textContent = "reconnecting"; } render(); }
+async function slow() { try { await loadCandles(); } catch (e) {} await loadKalshi(); render(); }
+slow(); fast(); loadHourly(); setInterval(fast, 3000); setInterval(slow, 15000); setInterval(loadHourly, 60000); setInterval(render, 1000);
 </script></body></html>
