@@ -126,7 +126,7 @@ details summary { cursor:pointer; color:var(--muted); font-size:13px; } details[
     <div class="note">Direction of the last closed bar and of price vs its 20-bar average, per timeframe. Tested on 4 years of BTC: as next-bar calls these are right 44–55% of the time and flip between years, so read them as the backdrop, not as signals.</div>
   </section>
   <section class="card model">
-    <div class="card-h"><h2>Hourly model · tested</h2><span class="chip" id="hTrend">—</span></div>
+    <div class="card-h"><h2>Hourly model · not proven</h2><span class="chip" id="hTrend">—</span></div>
     <div class="state" id="hWord">—</div>
     <div class="stats">
       <div class="stat"><div class="k">Last signal</div><div class="v" id="hLast">—</div></div>
@@ -135,7 +135,7 @@ details summary { cursor:pointer; color:var(--muted); font-size:13px; } details[
       <div class="stat"><div class="k">Move stop at</div><div class="v" id="hBE">—</div></div>
       <div class="stat"><div class="k">Next check</div><div class="v" id="hNext">—</div></div>
     </div>
-    <div class="note">Short only in a daily downtrend: an up hour, then a solid down hour. Stop above both hours, target 2R, stop to entry at +0.5R, close after 48 h. Backtest 2025–26: ~70% won, ≈ +0.07R per trade after costs.</div>
+    <div class="note">Short only in a daily downtrend: an up hour, then a solid down hour. Stop above both hours, target 2R, stop to entry at +0.5R, close after 48 h. ⚠ 4-year check: wins ~65–73% of trades, but after costs it lost in 2023–24 (−0.04R) and 2025 (−0.06R); only 2026 was positive (+0.09R). Treat it as context, not a proven edge.</div>
   </section>
 
   <section class="card">
