@@ -70,6 +70,11 @@ details summary { cursor:pointer; color:var(--muted); font-size:13px; } details[
 .reasons { display:flex; flex-wrap:wrap; gap:6px; } .reasons span { font-size:12px; font-weight:600; padding:4px 9px; border-radius:99px; background:var(--panel2); color:var(--muted); }
 .reasons span.on { background:var(--up-bg); color:var(--up); } .reasons span.key { background:var(--gold-bg); color:var(--gold); } .reasons span.neg { background:var(--down-bg); color:var(--down); }
 .chart.tall { height:320px; touch-action:none; cursor:grab; user-select:none; -webkit-user-select:none; } .c5bar { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; } .btn.sq { width:40px; padding:9px 0; font-size:17px; line-height:1; } .legend { display:flex; flex-wrap:wrap; gap:4px 12px; } .legend .sw { display:inline-block; width:10px; height:10px; border-radius:2px; opacity:.5; margin-right:4px; vertical-align:-1px; }
+.trsum { display:grid; grid-template-columns:auto repeat(5,minmax(0,1fr)); gap:6px 8px; align-items:center; font-size:13px; } .trsum .h { font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-weight:700; } .trsum .tf { font-weight:800; }
+.trlist { display:flex; flex-direction:column; max-height:360px; overflow:auto; border-top:1px solid var(--line); }
+.trlist { max-height:420px; } .tr-row { display:grid; grid-template-columns:44px minmax(0,1fr) auto 58px; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; } .tr-r { text-align:right; }
+.tr-g { font-weight:800; text-align:center; border-radius:8px; padding:5px 0; color:#fff; } .tr-g.u { background:var(--up); } .tr-g.d { background:var(--down); } .tr-g.B { opacity:.8; }
+.live-tag { font-size:10px; font-weight:700; color:var(--blue); }
 .model .state { font-size:22px; font-weight:800; } .note { font-size:12.5px; color:var(--muted); line-height:1.55; }
 </style></head><body>
 <div class="wrap">
@@ -111,6 +116,14 @@ details summary { cursor:pointer; color:var(--muted); font-size:13px; } details[
       <div class="pats" id="factTbl"></div>
       <p class="note">Grades were chosen on 2023–24 data only, then checked on 2025 and 2026, which the model had never seen. <b>A</b> = absorption at a liquidity sweep (heavy volume, aggressive sellers, but the bar closes in its upper half right after taking out a swing low; mirror for shorts): right 59% / 55% / 60% of the time 15 minutes later, about one every two days. <b>B</b> = absorption alone: 53–54%, about 2–3 a day. <b>C</b> = sweep, S/R or FVG without absorption: 50–52%, about a coin flip, so C is shown faint. What didn't help: FVG retests (≈50%, and worse when added to absorption), order flow pushing the same way as the trade (48%; the edge comes from absorbing that push), AMD bias and the 1h trend (≈51%). Trading the stop and targets with 4 bp exchange fees still lost about −0.15R per trade for grade A, because the stops are tight. Use the grade as a direction lean, for example the next Kalshi window, not as a fee-paying scalp. Alerts work only while this page is open.</p>
     </details>
+  </section>
+
+  <section class="card full" id="trCard">
+    <div class="card-h"><h2>A/B tracker · right or wrong</h2><span class="small muted" id="trMeta">—</span></div>
+    <div class="trsum" id="trSum"></div>
+    <div class="note">Right = price was on the call's side 15 minutes after entry. Confidence = the grade's tested hit rate (2026 holdout) when the alert fired, so "right" should land near it over time. Avg ±bp = average move in the call's direction (bp, before fees). Plan = total R from the stop / 2R target result, before fees. It needs ~50 alerts before the numbers mean much.</div>
+    <div class="trlist" id="trList"></div>
+    <div class="row"><button class="btn" id="trCopy">Copy log for Claude</button></div>
   </section>
 
   <section class="card call flat" id="callCard" aria-live="polite">
@@ -492,19 +505,49 @@ function runEngine(b) {
   const lv = (arr) => { const out = []; arr.forEach(v => { if (arr.filter(x => Math.abs(x - v) <= tol).length >= 2 && !out.some(o => Math.abs(o - v) <= tol)) out.push(v); }); return out; };
   return { sigs, sweeps, absorbs, fvgs, sup: lv(ls.map(j => L[j])), res: lv(hs.map(j => H[j])), asia, bias: amd[n - 1], atr: atr[i] };
 }
-function sigLog() { try { return JSON.parse(LS.get("sigLog") || "[]"); } catch (e) { return []; } }
+function sigLog() { try { return JSON.parse(LS.get("abLog") || "[]"); } catch (e) { return []; } }
+// Every A/B setup is logged (back-filled from the ~3.5 days of bars on screen, then kept on this phone) and scored:
+// 15-min call = close 15 min after entry vs entry; plan = stop / 2R target walked on 5-min bars (stop first if both in one bar), else marked at 4 h.
 function trackSignals() {
-  if (!ENG) return; let log = sigLog();
-  ENG.sigs.filter(x => x.grade !== "C" && Date.now() - (x.t + B5MS) < 20 * 60e3).forEach(x => {
-    if (log.some(y => y.t === x.t && y.s === x.s)) return;
-    log.push({ t: x.t, s: x.s, g: x.grade, e: x.entry });
+  if (!ENG) return; const log = sigLog(), now = Date.now(), have = new Set(log.map(y => y.t + ":" + y.s));
+  ENG.sigs.filter(x => x.grade !== "C").forEach(x => {
+    if (have.has(x.t + ":" + x.s)) return;
+    const fresh = now - (x.t + B5MS) < 20 * 60e3;
+    log.push({ t: x.t, s: x.s, g: x.grade, conf: GRADE[x.grade].hit[2], e: x.entry, stop: x.stop, t1: x.t1, t2: x.t2, live: fresh });
+    if (!fresh) return;
     const msg = `${x.s > 0 ? "LONG" : "SHORT"} · grade ${x.grade} at $${fmt(x.entry, 0)} · stop ${fmt(x.stop, 0)} · tested ${Math.round(GRADE[x.grade].hit[2] * 100)}% right in 15 min`;
     try { navigator.vibrate && navigator.vibrate(x.grade === "A" ? [250, 100, 250, 100, 250] : [200, 100, 200]); } catch (e) {}
     try { if (window.Notification && Notification.permission === "granted") new Notification(`BTC ${x.s > 0 ? "▲ LONG" : "▼ SHORT"} · ${x.grade}`, { body: msg, icon: "icon.svg", tag: "btc-setup-" + x.t }); } catch (e) {}
   });
-  log.forEach(y => { if (y.res == null) { const end = y.t + B5MS + 15 * 60e3, c = candles.filter(k => k.t < end).pop(); if (Date.now() > end + 60e3 && c && c.t >= end - 120e3) y.res = (c.c - y.e) * y.s > 0 ? 1 : 0; } });
-  LS.set("sigLog", JSON.stringify(log.slice(-300)));
+  const idx = new Map(B5.map((k, i) => [k.t, i]));
+  log.forEach(y => {
+    const i = idx.get(y.t); if (i == null) return;
+    if (y.x15 == null && B5[i + 3]) { y.x15 = B5[i + 3].c; y.mv = (y.x15 - y.e) * y.s / y.e * 1e4; y.res = y.mv > 0 ? 1 : 0; }
+    if (y.R == null) { const risk = Math.abs(y.e - y.stop); let out = null;
+      for (let j = i + 1; j <= i + 48 && j < B5.length; j++) { const k = B5[j], adv = y.s > 0 ? y.e - k.l : k.h - y.e, fav = y.s > 0 ? k.h - y.e : y.e - k.l;
+        if (fav >= risk) y.r1 = 1; if (adv >= risk) { out = -1; break; } if (fav >= 2 * risk) { out = 2; break; } }
+      if (out == null && B5[i + 48]) out = (B5[i + 48].c - y.e) * y.s / risk;
+      if (out != null) y.R = Math.round(out * 100) / 100; }
+  });
+  log.sort((x, y) => x.t - y.t); LS.set("abLog", JSON.stringify(log.slice(-500)));
+  renderTracker();
 }
+function renderTracker() {
+  const log = sigLog(), rows = [["A", log.filter(x => x.g === "A")], ["B", log.filter(x => x.g === "B")], ["All", log]];
+  const pc = v => v == null ? "—" : Math.round(v * 100) + "%", sg = (v, d = 1) => v == null || isNaN(v) ? "—" : (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(d);
+  $("trSum").innerHTML = `<span class="h"></span><span class="h">Alerts</span><span class="h">Right</span><span class="h">Conf.</span><span class="h">Avg ±bp</span><span class="h">Plan</span>` + rows.map(([g, a]) => {
+    const d = a.filter(x => x.res != null), r = a.filter(x => x.R != null), hit = d.length ? d.filter(x => x.res).length / d.length : null, conf = a.length ? a.reduce((s, x) => s + x.conf, 0) / a.length : null;
+    const mv = d.length ? d.reduce((s, x) => s + x.mv, 0) / d.length : null, R = r.reduce((s, x) => s + x.R, 0);
+    return `<span class="tf">${g}</span><span class="num">${a.length}</span><span class="num ${hit == null ? "" : hit >= (conf || .5) ? "good" : hit > .5 ? "" : "bad"}">${d.length ? `${pc(hit)} <small class="muted">${d.filter(x => x.res).length}/${d.length}</small>` : "—"}</span><span class="num muted">${pc(conf)}</span><span class="num ${mv > 0 ? "good" : mv < 0 ? "bad" : ""}">${sg(mv)}</span><span class="num ${R > 0 ? "good" : R < 0 ? "bad" : ""}">${r.length ? sg(R, 1) + "R" : "—"}</span>`; }).join("");
+  const recent = log.slice(-40).reverse(), tm = t => new Date(t + B5MS).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+  $("trList").innerHTML = recent.length ? recent.map(x => `<div class="tr-row"><span class="tr-g ${x.g} ${x.s > 0 ? "u" : "d"}">${x.g}${x.s > 0 ? "▲" : "▼"}</span>
+    <span class="tr-t">${tm(x.t)}${x.live ? ' <span class="live-tag">live</span>' : ""}<br><small class="muted num">@ ${fmt(x.e, 0)} · conf ${pc(x.conf)}</small></span>
+    <span class="num tr-r ${x.res == null ? "muted" : x.res ? "good" : "bad"}">${x.res == null ? "pending" : (x.res ? "✓ " : "✗ ") + sg(x.mv) + " bp"}<br><small class="muted">${x.x15 == null ? "" : ((x.x15 - x.e) * x.s >= 0 ? "+$" : "−$") + fmt(Math.abs((x.x15 - x.e) * x.s), 0)}</small></span>
+    <span class="num tr-r ${x.R == null ? "muted" : x.R > 0 ? "good" : "bad"}">${x.R == null ? (x.r1 ? "1R hit" : "open") : sg(x.R, 2) + "R"}</span></div>`).join("") : `<div class="small muted">No A/B setups yet. They show up here automatically, including ones from the last few days.</div>`;
+  const first = log[0]; $("trMeta").textContent = first ? `since ${new Date(first.t).toLocaleDateString([], { month: "short", day: "numeric" })}` : "—";
+}
+$("trCopy").onclick = async () => { const log = sigLog(), csv = "time_utc,side,grade,confidence,entry,stop,target2R,close_15m,move_bp,right_15m,plan_R,seen_live\n" + log.map(x => [new Date(x.t + B5MS).toISOString(), x.s > 0 ? "long" : "short", x.g, x.conf, x.e, Math.round(x.stop), Math.round(x.t2), x.x15 ?? "", x.mv == null ? "" : x.mv.toFixed(1), x.res ?? "", x.R ?? "", x.live ? 1 : 0].join(",")).join("\n");
+  try { await navigator.clipboard.writeText(csv); $("trCopy").textContent = "Copied ✓"; } catch (e) { $("trCopy").textContent = "Copy failed"; } setTimeout(() => $("trCopy").textContent = "Copy log for Claude", 2000); };
 function renderSetup() {
   const chip = $("feedChip"); chip.textContent = feed === "Coinbase" ? "order flow: Coinbase (builds while open)" : feed ? "order flow: " + feed : "order flow: offline"; chip.className = "chip " + (feed && feed !== "Coinbase" ? "ok" : "warn");
   if (!ENG) return;
