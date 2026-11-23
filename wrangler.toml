@@ -1,0 +1,6 @@
+# Cloudflare Worker: read-only Kalshi price relay for the BTC Live app (kalshi/index.html).
+# Cloudflare's build runs `npx wrangler deploy` from the repo root; this file tells it what to deploy.
+name = "kalshi-relay"
+main = "kalshi/worker.js"
+compatibility_date = "2024-09-23"
+workers_dev = true
