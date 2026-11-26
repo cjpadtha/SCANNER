@@ -497,6 +497,8 @@ if rthStart
     array.clear(vwPts)
 if isRth
     array.push(vwPts, chart.point.from_index(bar_index, vwap))
+    if array.size(vwPts) > 5000                         // polyline limit is 10,000 points; keep the newest 5,000 (on charts where the session reset never fires)
+        array.shift(vwPts)
 var array<line> lvLines = array.new<line>()
 var array<label> lvLabels = array.new<label>()
 var polyline vwLine = na
