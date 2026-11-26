@@ -304,6 +304,7 @@ string mSetup = model == M0 ? "MAIN" : model == M2 or model == M4 ? "ORB15" : mo
 string mFilt  = model == M0 or model == M1 or model == M2 or model == M10 ? "daily" : model == M3 or model == M5 ? "vwap" : model == M4 or model == M8 ? "both" :
      model == M7 or model == M9 ? "flow" : "none"
 
+// ★ MAIN TAKE-PROFITS (Cole, 2026-11-26: every trade has a TP, always > 1R; picked on 2023-24): ORB15 2.5R · HVN 3R · SWEEP 2.5R · ORB30 3R · IMOM 1.5R; still flat 15:55
 // pick this bar's signal for the selected model (priority if several fire on one bar: ORB15, SWEEP, ORB30, IMOM)
 int d = 0
 float stp = na
@@ -314,27 +315,27 @@ bool firstLike = mSetup == "FIRST" or (mSetup == "MAIN" and not tradedToday)    
 if mainA or ((mSetup == "ORB15" or firstLike) and sigORB15 != 0 and f_pass(mFilt, sigORB15))
     d := sigORB15
     stp := stORB15
-    tgt := close + d * 2.0 * math.abs(close - stp)
+    tgt := close + d * (mSetup == "MAIN" ? 2.5 : 2.0) * math.abs(close - stp)
     why := "ORB15"
 else if firstLike and sigHVN != 0 and f_pass(mFilt, sigHVN)
     d := sigHVN
     stp := stHVN
-    tgt := na
+    tgt := mSetup == "MAIN" ? close + d * 3.0 * math.abs(close - stp) : na
     why := "HVN"
 else if (mSetup == "SWEEP" or firstLike) and sigSWEEP != 0 and f_pass(mFilt, sigSWEEP)
     d := sigSWEEP
     stp := stSWEEP
-    tgt := close + d * 1.5 * math.abs(close - stp)
+    tgt := close + d * (mSetup == "MAIN" ? 2.5 : 1.5) * math.abs(close - stp)
     why := "SWEEP"
 else if (mSetup == "ORB30" or firstLike) and sigORB30 != 0 and f_pass(mFilt, sigORB30)
     d := sigORB30
     stp := stORB30
-    tgt := na
+    tgt := mSetup == "MAIN" ? close + d * 3.0 * math.abs(close - stp) : na
     why := "ORB30"
 else if firstLike and sigIMOM != 0 and f_pass(mFilt, sigIMOM)
     d := sigIMOM
     stp := stIMOM
-    tgt := na
+    tgt := mSetup == "MAIN" ? close + d * 1.5 * math.abs(close - stp) : na
     why := "IMOM"
 
 // ★ MAIN stricter longs (2026-11-22): a long is taken only when the daily trend AND the 15-min structure agree.
@@ -378,7 +379,7 @@ if d != 0 and canTrade
     pEntry := close
     pRisk := math.abs(close - stp)
     pDir := d
-    pTrail := why == "HVN"
+    pTrail := why == "HVN" and mSetup != "MAIN"          // ★ MAIN HVN uses the fixed 3R take-profit instead (Cole, 2026-11-26)
     pBest := close
     pStop := stp
     if showPos
