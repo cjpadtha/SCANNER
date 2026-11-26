@@ -504,8 +504,13 @@ var array<label> lvLabels = array.new<label>()
 var polyline vwLine = na
 f_level(float y, int x1, string txt, color col, int w) =>
     if not na(y) and not na(x1)
-        array.push(lvLines, line.new(x1, y, bar_index + 3, y, color = col, width = w))
+        int xs = math.max(x1, bar_index - 4900)        // TradingView allows lines to start at most ~5,000 bars back
+        array.push(lvLines, line.new(xs, y, bar_index + 3, y, color = col, width = w))
         array.push(lvLabels, label.new(bar_index + 3, y, txt, style = label.style_label_left, color = color.new(color.black, 100), textcolor = col, size = size.tiny))
+var label tfWarn = na
+if barstate.islast and (timeframe.in_seconds() < 60 or timeframe.in_seconds() > 900)
+    label.delete(tfWarn)
+    tfWarn := label.new(bar_index, high, "★ MAIN needs a 1–15 minute chart (best: NQ1! 5m, regular session)", style = label.style_label_down, color = color.new(color.red, 10), textcolor = color.white, size = size.normal)
 if barstate.islastconfirmedhistory or barstate.isrealtime
     for l in lvLines
         line.delete(l)
